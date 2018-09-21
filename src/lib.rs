@@ -87,10 +87,6 @@ pub fn crypto_box(c: &mut [u8], m: &[u8], n: &CryptoBoxNonce, pk: &CryptoBoxPk, 
             )
         );
     }
-
-    for i in 0..(crypto_box_curve25519xsalsa20poly1305_BOXZEROBYTES as usize) {
-        assert!(c[i] == 0);
-    }
 }
 
 pub fn crypto_box_open(
@@ -145,6 +141,10 @@ fn test_boxed_crypto_box() {
         m1[i as usize] = 0;
     }
     crypto_box(&mut c[..], &m1, &n, &pk, &sk);
+
+    for i in 0..(crypto_box_curve25519xsalsa20poly1305_BOXZEROBYTES as usize) {
+        assert!(c[i] == 0);
+    }
 
     assert!(crypto_box_open(&mut m2[..], &c, &n, &pk, &sk));
     assert_eq!(
