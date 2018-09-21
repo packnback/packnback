@@ -7,6 +7,11 @@ use rand::RngCore;
 mod bindings;
 use self::bindings::*;
 
+pub const CRYPTO_SIGN_BYTES: usize = crypto_sign_ed25519_BYTES as usize;
+pub const CRYPTO_BOX_ZEROBYTES: usize = crypto_box_curve25519xsalsa20poly1305_ZEROBYTES as usize;
+pub const CRYPTO_BOX_BOXZEROBYTES: usize =
+    crypto_box_curve25519xsalsa20poly1305_BOXZEROBYTES as usize;
+
 #[derive(Default)]
 pub struct CryptoBoxNonce {
     pub bytes: [u8; crypto_box_curve25519xsalsa20poly1305_NONCEBYTES as usize],
@@ -65,6 +70,89 @@ pub fn boxed_crypto_box_keypair() -> (Box<CryptoBoxPk>, Box<CryptoBoxSk>) {
     let mut sk = Box::<CryptoBoxSk>::new(Default::default());
     crypto_box_keypair(&mut *pk, &mut *sk);
     (pk, sk)
+}
+
+#[derive(Default)]
+pub struct CryptoSignPk {
+    pub bytes: [u8; crypto_sign_ed25519_PUBLICKEYBYTES as usize],
+}
+
+pub struct CryptoSignSk {
+    pub bytes: [u8; crypto_sign_ed25519_SECRETKEYBYTES as usize],
+}
+
+impl Default for CryptoSignSk {
+    fn default() -> CryptoSignSk {
+        CryptoSignSk {
+            bytes: [0; crypto_sign_ed25519_SECRETKEYBYTES as usize],
+        }
+    }
+}
+
+impl Drop for CryptoSignSk {
+    fn drop(&mut self) {
+        // XXX This may be optimized away, how to ensure wiping of memory
+        // It is not totally critical but nice to have.
+        self.bytes = [0; crypto_sign_ed25519_SECRETKEYBYTES as usize];
+    }
+}
+
+pub fn crypto_sign_keypair(pk: &mut CryptoSignPk, sk: &mut CryptoSignSk) {
+    unsafe {
+        assert!(
+            0 == crypto_sign_ed25519_tweet_keypair(pk.bytes.as_mut_ptr(), sk.bytes.as_mut_ptr())
+        );
+    }
+}
+
+pub fn boxed_crypto_sign_keypair() -> (Box<CryptoSignPk>, Box<CryptoSignSk>) {
+    let mut pk = Box::<CryptoSignPk>::new(Default::default());
+    let mut sk = Box::<CryptoSignSk>::new(Default::default());
+    crypto_sign_keypair(&mut *pk, &mut *sk);
+    (pk, sk)
+}
+
+pub fn crypto_sign(sm: &mut [u8], m: &[u8], sk: &CryptoSignSk) -> usize {
+    // Contract from nacl api.
+    assert!(sm.len() >= m.len() + crypto_sign_ed25519_BYTES as usize);
+
+    let mut smsz: u64 = 0;
+
+    unsafe {
+        assert!(
+            0 == crypto_sign_ed25519_tweet(
+                sm.as_mut_ptr(),
+                &mut smsz,
+                m.as_ptr(),
+                m.len() as u64,
+                sk.bytes.as_ptr()
+            )
+        );
+    }
+
+    smsz as usize
+}
+
+pub fn crypto_sign_open(m: &mut [u8], sm: &[u8], pk: &CryptoSignPk) -> Option<usize> {
+    assert!(m.len() >= sm.len());
+
+    let mut msz: u64 = 0;
+
+    let rc = unsafe {
+        crypto_sign_ed25519_tweet_open(
+            m.as_mut_ptr(),
+            &mut msz,
+            sm.as_ptr(),
+            sm.len() as u64,
+            pk.bytes.as_ptr(),
+        )
+    };
+
+    if rc != 0 {
+        None
+    } else {
+        Some(msz as usize)
+    }
 }
 
 pub fn crypto_box(c: &mut [u8], m: &[u8], n: &CryptoBoxNonce, pk: &CryptoBoxPk, sk: &CryptoBoxSk) {
@@ -128,7 +216,7 @@ pub extern "C" fn randombytes(p: *mut u8, sz: usize) -> usize {
 // Tests --------------------
 
 #[test]
-fn test_boxed_crypto_box() {
+fn test_crypto_box() {
     const MSIZE: usize = (crypto_box_curve25519xsalsa20poly1305_BOXZEROBYTES + 128) as usize;
     let mut m1: [u8; MSIZE] = [3; MSIZE];
     let mut m2: [u8; MSIZE] = [0; MSIZE];
@@ -151,6 +239,19 @@ fn test_boxed_crypto_box() {
         m1[(crypto_box_curve25519xsalsa20poly1305_ZEROBYTES as usize)..],
         m2[(crypto_box_curve25519xsalsa20poly1305_ZEROBYTES as usize)..]
     )
+}
+
+#[test]
+fn test_crypto_sign() {
+    const MSIZE: usize = 32;
+    const SMSIZE: usize = MSIZE + (crypto_sign_ed25519_BYTES as usize);
+    let m1: [u8; MSIZE] = [3; MSIZE];
+    let mut m2: [u8; SMSIZE] = [0; SMSIZE];
+    let mut sm: [u8; SMSIZE] = [0; SMSIZE];
+    let (pk, sk) = boxed_crypto_sign_keypair();
+    let smsz = crypto_sign(&mut sm[..], &m1, &*sk);
+    let m2sz = crypto_sign_open(&mut m2[..], &sm[..smsz], &*pk).unwrap();
+    assert_eq!(m1, m2[0..m2sz]);
 }
 
 #[test]
