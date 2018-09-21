@@ -1,4 +1,4 @@
-# packnback
+# [packnback](https://packnback.github.io)
 
 packnback aims to bean open source, high performance, security conscious backup tool
 supporting client side encryption and deduplication.
