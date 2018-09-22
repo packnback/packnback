@@ -1,16 +1,17 @@
 # Attitude
 
 We are a mission critical data storage tool and people 
-depend on us shouldn't be let down. 
+depend on us shouldn't be let down. Fun is still allowed.
 
 # Programming
 
 All rust code is run through rustfmt.
 
+Try to follow rust community guidelines.
+
 Keep the data write path as small as possible.
 
-Focus on allowing data pipelining in both up and down
-directions.
+Focus on allowing data pipelining where latency may be an issue.
 
 # Security
 
