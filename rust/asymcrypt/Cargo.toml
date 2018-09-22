@@ -1,0 +1,10 @@
+[package]
+name = "asymcrypt"
+version = "0.1.0"
+authors = ["Andrew Chambers <andrewchambers@fastmail.com>"]
+edition = "2018"
+
+[dependencies]
+
+[dependencies.tweetnacl]
+path = "../tweetnacl"

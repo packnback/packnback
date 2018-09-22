@@ -12,6 +12,7 @@ pub const CRYPTO_BOX_ZEROBYTES: usize = crypto_box_curve25519xsalsa20poly1305_ZE
 pub const CRYPTO_BOX_BOXZEROBYTES: usize =
     crypto_box_curve25519xsalsa20poly1305_BOXZEROBYTES as usize;
 
+#[derive(Clone)]
 #[derive(Default)]
 pub struct CryptoBoxNonce {
     pub bytes: [u8; crypto_box_curve25519xsalsa20poly1305_NONCEBYTES as usize],
@@ -36,6 +37,7 @@ impl CryptoBoxNonce {
     }
 }
 
+#[derive(Clone)]
 #[derive(Default)]
 pub struct CryptoBoxPk {
     pub bytes: [u8; crypto_box_curve25519xsalsa20poly1305_PUBLICKEYBYTES as usize],
@@ -72,6 +74,7 @@ pub fn boxed_crypto_box_keypair() -> (Box<CryptoBoxPk>, Box<CryptoBoxSk>) {
     (pk, sk)
 }
 
+#[derive(Clone)]
 #[derive(Default)]
 pub struct CryptoSignPk {
     pub bytes: [u8; crypto_sign_ed25519_PUBLICKEYBYTES as usize],
