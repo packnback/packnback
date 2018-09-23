@@ -1,8 +1,8 @@
 [package]
-name = "asymcrypt"
+name = "chaclstar"
 version = "0.1.0"
 authors = ["Andrew Chambers <andrewchambers@fastmail.com>"]
 edition = "2018"
 
-[dependencies.haclstar]
-path = "../haclstar"
+[build-dependencies]
+cc = "*"

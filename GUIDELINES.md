@@ -5,7 +5,7 @@ depend on us shouldn't be let down. Fun is still allowed.
 
 # Programming
 
-All rust code is run through rustfmt.
+All rust code is run through rustfmt + clippy.
 
 Try to follow rust community guidelines.
 

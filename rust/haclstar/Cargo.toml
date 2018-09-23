@@ -1,11 +1,11 @@
 [package]
-name = "tweetnacl"
+name = "haclstar"
 version = "0.1.0"
 authors = ["Andrew Chambers <andrewchambers@fastmail.com>"]
 edition = "2018"
 
-[build-dependencies]
-cc = "*"
+[dependencies.chaclstar]
+path = "../chaclstar"
 
 [dependencies]
 

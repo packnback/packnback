@@ -1,13 +1,13 @@
-extern crate tweetnacl;
+extern crate haclstar;
+use haclstar::nacl::*;
 use std::error;
 use std::fmt;
-use tweetnacl::*;
 
 #[derive(Default)]
 pub struct Key {
-    pub box_sk: CryptoBoxSk,
+    pub box_sk: Box<CryptoBoxSk>,
     pub box_pk: CryptoBoxPk,
-    pub sign_sk: CryptoSignSk,
+    pub sign_sk: Box<CryptoSignSk>,
     pub sign_pk: CryptoSignPk,
 }
 
@@ -18,11 +18,15 @@ pub struct PublicKey {
 }
 
 impl Key {
-    pub fn new() -> Box<Key> {
-        let mut k = Box::<Key>::new(Default::default());
-        crypto_box_keypair(&mut k.box_pk, &mut k.box_sk);
-        crypto_sign_keypair(&mut k.sign_pk, &mut k.sign_sk);
-        k
+    pub fn new() -> Key {
+        let (box_pk, box_sk) = crypto_box_keypair();
+        let (sign_pk, sign_sk) = crypto_sign_keypair();
+        Key {
+            box_pk: box_pk,
+            box_sk: box_sk,
+            sign_pk: sign_pk,
+            sign_sk: sign_sk,
+        }
     }
 
     pub fn pub_key(&self) -> PublicKey {
@@ -41,9 +45,9 @@ impl Key {
         Ok(())
     }
 
-    pub fn read_boxed_from(r: &mut std::io::Read) -> Result<Box<Key>, AsymcryptError> {
+    pub fn read_boxed_from(r: &mut std::io::Read) -> Result<Key, AsymcryptError> {
         expect_header(r, KEYHEADER)?;
-        let mut k = Box::<Key>::new(Default::default());
+        let mut k: Key = Default::default();
         r.read_exact(&mut k.box_pk.bytes)?;
         r.read_exact(&mut k.box_sk.bytes)?;
         r.read_exact(&mut k.sign_pk.bytes)?;
@@ -53,6 +57,15 @@ impl Key {
 }
 
 impl PublicKey {
+    /*
+    pub fn id(&self) -> () {
+      let mut hasher = Sha256::default();
+      hasher.input(self.box_pk.bytes);
+      hasher.input(self.sign_pk.bytes);
+      hasher.result()
+    }
+    */
+
     pub fn write(&self, w: &mut std::io::Write) -> Result<(), std::io::Error> {
         write_header(w, PUBKEYHEADER)?;
         w.write_all(&self.box_pk.bytes)?;
@@ -124,7 +137,7 @@ const CIPHERTEXTHEADER: AsymcryptHeaderType = 3;
 const HEADEREND: AsymcryptHeaderType = 4;
 
 fn u16_to_header_type(t: u16) -> Option<AsymcryptHeaderType> {
-    if t >= KEYHEADER && t < HEADEREND {
+    if t < HEADEREND {
         Some(t as AsymcryptHeaderType)
     } else {
         None
@@ -136,7 +149,7 @@ fn u16_be_bytes(v: u16) -> (u8, u8) {
 }
 
 fn be_bytes_to_u16(hi: u8, lo: u8) -> u16 {
-    ((hi as u16) << 8) | (lo as u16)
+    (u16::from(hi) << 8) | u16::from(lo)
 }
 
 const MAGIC_LEN: usize = 9;
@@ -148,9 +161,9 @@ fn write_header(
     let magic = "asymcrypt";
     assert!(MAGIC_LEN == magic.len());
     w.write_all(magic.as_bytes())?;
-    let (a, b) = u16_be_bytes(2);
-    let (c, d) = u16_be_bytes(val_type as u16);
-    let ver_and_val = [a, b, c, d];
+    let (ver_hi, ver_lo) = u16_be_bytes(2);
+    let (type_hi, type_lo) = u16_be_bytes(val_type as u16);
+    let ver_and_val = [ver_hi, ver_lo, type_hi, type_lo];
     w.write_all(&ver_and_val[..])
 }
 
@@ -188,8 +201,8 @@ fn expect_header(
     }
 }
 
-fn read_exact_or_eof(r: &mut std::io::Read, buf: &mut [u8]) -> Result<usize, std::io::Error> {
-    let n: usize = 0;
+fn read_exact_or_eof(r: &mut std::io::Read, mut buf: &mut [u8]) -> Result<usize, std::io::Error> {
+    let mut n: usize = 0;
     loop {
         match r.read(buf)? {
             0 => return Ok(n),
@@ -201,17 +214,17 @@ fn read_exact_or_eof(r: &mut std::io::Read, buf: &mut [u8]) -> Result<usize, std
     }
 }
 
-fn encrypt(
+pub fn encrypt(
     in_data: &mut std::io::Read,
     out_data: &mut std::io::Write,
-    toKey: &PublicKey,
+    to_key: &PublicKey,
 ) -> Result<(), std::io::Error> {
     const READ_SZ: usize = 16384;
     const BUF_SZ: usize = READ_SZ + CRYPTO_BOX_ZEROBYTES + 2;
     let mut plain_text: [u8; BUF_SZ] = [0; BUF_SZ];
     let mut cipher_text: [u8; BUF_SZ] = [0; BUF_SZ];
     let mut nonce = CryptoBoxNonce::new();
-    let (ephemeral_pk, ephemeral_sk) = boxed_crypto_box_keypair();
+    let (ephemeral_pk, ephemeral_sk) = crypto_box_keypair();
 
     write_header(out_data, CIPHERTEXTHEADER)?;
     out_data.write_all(&ephemeral_pk.bytes)?;
@@ -219,7 +232,7 @@ fn encrypt(
     out_data.write_all(&nonce.bytes)?;
 
     loop {
-        match read_exact_or_eof(&mut in_data, &mut plain_text[CRYPTO_BOX_ZEROBYTES + 2..])? {
+        match read_exact_or_eof(in_data, &mut plain_text[CRYPTO_BOX_ZEROBYTES + 2..])? {
             0 => {
                 break;
             }
@@ -232,7 +245,7 @@ fn encrypt(
                     &mut cipher_text,
                     &plain_text,
                     &nonce,
-                    &toKey.box_pk,
+                    &to_key.box_pk,
                     &ephemeral_sk,
                 );
                 out_data.write_all(&mut cipher_text[CRYPTO_BOX_BOXZEROBYTES..])?;
