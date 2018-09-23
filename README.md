@@ -8,7 +8,7 @@ supporting client side encryption and deduplication.
 ...
 
 - ~~[Choose programming language](https://packnback.github.io/blog/programming_languages/).~~ Rust
-- Get small portable nacl implementation. - Making our own tiny auditable tweetnacl wrapper.
+- Get small portable nacl implementation. - Wrapping hacl-star.
 - Reimplement [asymcrypt](https://packnback.github.io/blog/asymmetric_encryption/) in rust, probably improving the spec.
 
 ...
