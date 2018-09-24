@@ -31,6 +31,10 @@ impl Sha2_256 {
     }
 
     pub fn update(&mut self, buf: &[u8]) -> () {
+        // XXX Performance optimization, avoid copy
+        // when aligned at 64 with update_multi
+        // Add benchmarks first...
+
         for b in buf.iter() {
             self.addb(*b)
         }
@@ -132,5 +136,10 @@ fn bench_1_million_bytes(b: &mut Bencher) {
     let mut s = Sha2_256::new();
     s.update(&v);
     s.finish();
+}
+
+#[bench]
+fn bench_1_million_bytes_60kb_at_a_time(b: &mut Bencher) {
+    TODO
 }
 */
