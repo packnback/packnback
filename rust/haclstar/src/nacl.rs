@@ -210,7 +210,12 @@ fn test_crypto_box() {
     assert_eq!(
         m1[(nacl::crypto_box_ZEROBYTES as usize)..],
         m2[(nacl::crypto_box_ZEROBYTES as usize)..]
-    )
+    );
+
+    // corrupt/tamper
+    let corrupt_at = (nacl::crypto_box_BOXZEROBYTES + 1) as usize;
+    c[corrupt_at] = !c[corrupt_at];
+    assert!(crypto_box_open(&mut m2[..], &c, &n, &pk, &sk) == false);
 }
 
 #[test]

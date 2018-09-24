@@ -222,13 +222,14 @@ fn read_exact_or_eof(r: &mut std::io::Read, mut buf: &mut [u8]) -> Result<usize,
     }
 }
 
+const DATA_BLOCK_SZ: usize = 16384;
+
 pub fn encrypt(
     in_data: &mut std::io::Read,
     out_data: &mut std::io::Write,
     to_key: &PublicKey,
 ) -> Result<(), std::io::Error> {
-    const READ_SZ: usize = 16384;
-    const BUF_SZ: usize = READ_SZ + CRYPTO_BOX_ZEROBYTES + 2;
+    const BUF_SZ: usize = CRYPTO_BOX_ZEROBYTES + 2 + DATA_BLOCK_SZ;
     let mut plain_text: [u8; BUF_SZ] = [0; BUF_SZ];
     let mut cipher_text: [u8; BUF_SZ] = [0; BUF_SZ];
     let mut nonce = CryptoBoxNonce::new();
@@ -264,4 +265,130 @@ pub fn encrypt(
     }
 
     Ok(())
+}
+
+pub fn decrypt(
+    in_data: &mut std::io::Read,
+    out_data: &mut std::io::Write,
+    key: &Key,
+) -> Result<(), AsymcryptError> {
+    const BUF_SZ: usize = CRYPTO_BOX_ZEROBYTES + 2 + DATA_BLOCK_SZ;
+    let mut plain_text: [u8; BUF_SZ] = [0; BUF_SZ];
+    let mut cipher_text: [u8; BUF_SZ] = [0; BUF_SZ];
+
+    let mut recipient_kid: KeyID = [0; 32];
+    let mut ephemeral_pk: CryptoBoxPk = Default::default();
+    let mut nonce: CryptoBoxNonce = Default::default();
+
+    expect_header(in_data, CIPHERTEXTHEADER)?;
+    in_data.read_exact(&mut ephemeral_pk.bytes)?;
+    in_data.read_exact(&mut recipient_kid)?;
+    in_data.read_exact(&mut nonce.bytes)?;
+
+    if recipient_kid != key.id() {
+        return Err(AsymcryptError::DecryptKeyMismatchError);
+    }
+
+    loop {
+        in_data.read_exact(&mut cipher_text[CRYPTO_BOX_BOXZEROBYTES..])?;
+
+        if !crypto_box_open(
+            &mut plain_text,
+            &cipher_text,
+            &nonce,
+            &ephemeral_pk,
+            &key.box_sk,
+        ) {
+            return Err(AsymcryptError::CorruptOrTamperedDataError);
+        }
+
+        let msz = be_bytes_to_u16(plain_text[0], plain_text[1]) as usize;
+
+        out_data.write_all(&plain_text[2..2 + msz])?;
+        nonce.inc();
+
+        if msz != DATA_BLOCK_SZ + 2 {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_encrypt_decrypt() {
+    use std::io::Cursor;
+
+    // Large enough to loop multiple times
+    const SZ: usize = 100000;
+
+    let key = Key::new();
+    let mut pt_cursor = Cursor::new(vec![2; SZ]);
+    let mut ct_cursor = Cursor::new(Vec::new());
+
+    encrypt(&mut pt_cursor, &mut ct_cursor, &key.pub_key()).unwrap();
+
+    pt_cursor.set_position(0);
+    ct_cursor.set_position(0);
+
+    decrypt(&mut ct_cursor, &mut pt_cursor, &key).unwrap();
+
+    let pt = pt_cursor.get_ref();
+
+    for i in 0..SZ {
+        assert_eq!(pt[i], 2);
+    }
+}
+
+#[test]
+fn test_encrypt_decrypt_tampered() {
+    use std::io::Cursor;
+
+    const SZ: usize = 200;
+
+    let key = Key::new();
+    let mut pt_cursor = Cursor::new(vec![2; SZ]);
+    let mut ct_cursor = Cursor::new(Vec::new());
+
+    encrypt(&mut pt_cursor, &mut ct_cursor, &key.pub_key()).unwrap();
+
+    pt_cursor.set_position(0);
+    ct_cursor.set_position(0);
+
+    let ct = ct_cursor.get_mut();
+    ct[100] = !ct[100];
+
+    match decrypt(&mut ct_cursor, &mut pt_cursor, &key) {
+        Err(AsymcryptError::CorruptOrTamperedDataError) => (),
+        v => {
+            println!("{:?}", v);
+            panic!(v)
+        }
+    }
+}
+
+#[test]
+fn test_encrypt_decrypt_wrong_key() {
+    use std::io::Cursor;
+
+    const SZ: usize = 200;
+
+    let key = Key::new();
+    let mut pt_cursor = Cursor::new(vec![2; SZ]);
+    let mut ct_cursor = Cursor::new(Vec::new());
+
+    encrypt(&mut pt_cursor, &mut ct_cursor, &key.pub_key()).unwrap();
+
+    let key = Key::new();
+
+    pt_cursor.set_position(0);
+    ct_cursor.set_position(0);
+
+    match decrypt(&mut ct_cursor, &mut pt_cursor, &key) {
+        Err(AsymcryptError::DecryptKeyMismatchError) => (),
+        v => {
+            println!("{:?}", v);
+            panic!(v)
+        }
+    }
 }
