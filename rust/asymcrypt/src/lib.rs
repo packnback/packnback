@@ -25,10 +25,10 @@ impl Key {
         let (box_pk, box_sk) = crypto_box_keypair();
         let (sign_pk, sign_sk) = crypto_sign_keypair();
         Key {
-            box_pk: box_pk,
-            box_sk: box_sk,
-            sign_pk: sign_pk,
-            sign_sk: sign_sk,
+            box_pk,
+            box_sk,
+            sign_pk,
+            sign_sk,
         }
     }
 
@@ -236,7 +236,7 @@ pub fn encrypt(
 
     write_header(out_data, CIPHERTEXTHEADER)?;
     out_data.write_all(&ephemeral_pk.bytes)?;
-    // XXX write key id.
+    out_data.write_all(&to_key.id())?;
     out_data.write_all(&nonce.bytes)?;
 
     loop {
@@ -256,7 +256,7 @@ pub fn encrypt(
                     &to_key.box_pk,
                     &ephemeral_sk,
                 );
-                out_data.write_all(&mut cipher_text[CRYPTO_BOX_BOXZEROBYTES..])?;
+                out_data.write_all(&cipher_text[CRYPTO_BOX_BOXZEROBYTES..])?;
             }
         }
 

@@ -73,6 +73,12 @@ impl Sha2_256 {
     }
 }
 
+impl Default for Sha2_256 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn sha2_256(buf: &[u8]) -> [u8; HACL_SHA2_256_SIZE_HASH] {
     let mut s = Sha2_256::new();
     s.update(buf);

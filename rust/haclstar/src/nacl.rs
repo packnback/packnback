@@ -140,8 +140,8 @@ pub fn crypto_box(c: &mut [u8], m: &[u8], n: &CryptoBoxNonce, pk: &CryptoBoxPk, 
     // Contract from nacl api.
     assert!(c.len() >= m.len());
     assert!(m.len() >= nacl::crypto_box_ZEROBYTES as usize);
-    for i in 0..(nacl::crypto_box_ZEROBYTES as usize) {
-        assert!(m[i] == 0);
+    for b in m.iter().take(nacl::crypto_box_ZEROBYTES as usize) {
+        assert!(*b == 0);
     }
 
     unsafe {
@@ -169,8 +169,8 @@ pub fn crypto_box_open(
     assert!(m.len() >= c.len());
     assert!(c.len() >= nacl::crypto_box_BOXZEROBYTES as usize);
 
-    for i in 0..(nacl::crypto_box_BOXZEROBYTES as usize) {
-        m[i] = 0;
+    for b in m.iter().take(nacl::crypto_box_BOXZEROBYTES as usize) {
+        assert!(*b == 0);
     }
 
     unsafe {
