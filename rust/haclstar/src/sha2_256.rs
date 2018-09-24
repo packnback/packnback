@@ -73,12 +73,16 @@ impl Sha2_256 {
     }
 }
 
+pub fn sha2_256(buf: &[u8]) -> [u8; HACL_SHA2_256_SIZE_HASH] {
+    let mut s = Sha2_256::new();
+    s.update(buf);
+    s.finish()
+}
+
 #[test]
 fn test_sha256_zero_size() {
-    let mut s = Sha2_256::new();
-    s.update(b"");
     assert_eq!(
-        s.finish(),
+        sha2_256(b""),
         // python: list(bytearray.fromhex(hashlib.sha256(b"").hexdigest()))
         [
             227, 176, 196, 66, 152, 252, 28, 20, 154, 251, 244, 200, 153, 111, 185, 36, 39, 174,
@@ -89,10 +93,8 @@ fn test_sha256_zero_size() {
 
 #[test]
 fn test_sha256_less_than_chunk_size() {
-    let mut s = Sha2_256::new();
-    s.update(b"xxx");
     assert_eq!(
-        s.finish(),
+        sha2_256(b"xxx"),
         // python: list(bytearray.fromhex(hashlib.sha256(b"x"*3).hexdigest()))
         [
             205, 46, 176, 131, 124, 155, 76, 150, 44, 34, 210, 255, 139, 84, 65, 183, 180, 88, 5,
@@ -103,10 +105,8 @@ fn test_sha256_less_than_chunk_size() {
 
 #[test]
 fn test_sha256_exact_chunk_size() {
-    let mut s = Sha2_256::new();
-    s.update(b"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
     assert_eq!(
-        s.finish(),
+        sha2_256(b"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
         // python list(bytearray.fromhex(hashlib.sha256(b"x"*64).hexdigest()))
         [
             124, 225, 0, 151, 31, 100, 231, 0, 30, 143, 229, 165, 25, 115, 236, 223, 225, 206, 212,
@@ -117,10 +117,8 @@ fn test_sha256_exact_chunk_size() {
 
 #[test]
 fn test_sha256_more_than_chunk_size() {
-    let mut s = Sha2_256::new();
-    s.update(b"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
     assert_eq!(
-        s.finish(),
+        sha2_256(b"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
         // python: list(bytearray.fromhex(hashlib.sha256(b"x"*66).hexdigest()))
         [
             110, 184, 121, 241, 41, 28, 110, 231, 213, 198, 25, 210, 124, 123, 92, 156, 51, 24,
