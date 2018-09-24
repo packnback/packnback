@@ -1,5 +1,6 @@
 extern crate haclstar;
 use haclstar::nacl::*;
+use haclstar::sha2_256::*;
 use std::error;
 use std::fmt;
 
@@ -17,6 +18,8 @@ pub struct PublicKey {
     pub sign_pk: CryptoSignPk,
 }
 
+type KeyID = [u8; 32];
+
 impl Key {
     pub fn new() -> Key {
         let (box_pk, box_sk) = crypto_box_keypair();
@@ -27,6 +30,13 @@ impl Key {
             sign_pk: sign_pk,
             sign_sk: sign_sk,
         }
+    }
+
+    pub fn id(&self) -> KeyID {
+        let mut s = Sha2_256::new();
+        s.update(&self.box_pk.bytes);
+        s.update(&self.sign_pk.bytes);
+        s.finish()
     }
 
     pub fn pub_key(&self) -> PublicKey {
@@ -57,14 +67,12 @@ impl Key {
 }
 
 impl PublicKey {
-    /*
-    pub fn id(&self) -> () {
-      let mut hasher = Sha256::default();
-      hasher.input(self.box_pk.bytes);
-      hasher.input(self.sign_pk.bytes);
-      hasher.result()
+    pub fn id(&self) -> KeyID {
+        let mut s = Sha2_256::new();
+        s.update(&self.box_pk.bytes);
+        s.update(&self.sign_pk.bytes);
+        s.finish()
     }
-    */
 
     pub fn write(&self, w: &mut std::io::Write) -> Result<(), std::io::Error> {
         write_header(w, PUBKEYHEADER)?;
