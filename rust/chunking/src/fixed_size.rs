@@ -1,6 +1,6 @@
 pub struct FixedSizeChunker {
     sz: usize,
-    cur_vec: Box<Vec<u8>>,
+    cur_vec: Vec<u8>,
 }
 
 fn read_exact_or_eof(r: &mut std::io::Read, buf: &mut [u8]) -> Result<usize, std::io::Error> {
@@ -22,18 +22,18 @@ impl FixedSizeChunker {
         assert!(sz != 0);
 
         FixedSizeChunker {
-            sz: sz,
-            cur_vec: Box::new(Vec::<u8>::with_capacity(sz)),
+            sz,
+            cur_vec: Vec::<u8>::with_capacity(sz),
         }
     }
 
-    pub fn add_bytes(&mut self, buf: &[u8]) -> (usize, Option<Box<Vec<u8>>>) {
+    pub fn add_bytes(&mut self, buf: &[u8]) -> (usize, Option<Vec<u8>>) {
         let spare_capacity = self.cur_vec.capacity() - self.cur_vec.len();
         let n_to_read = std::cmp::min(spare_capacity, buf.len());
         self.cur_vec.extend(buf.iter().take(n_to_read));
 
         if self.cur_vec.len() == self.sz {
-            let mut v = Box::new(Vec::<u8>::with_capacity(self.sz));
+            let mut v = Vec::<u8>::with_capacity(self.sz);
             std::mem::swap(&mut v, &mut self.cur_vec);
             assert!(v.len() == self.sz);
             (n_to_read, Some(v))
@@ -42,10 +42,7 @@ impl FixedSizeChunker {
         }
     }
 
-    pub fn read_chunk(
-        &mut self,
-        r: &mut std::io::Read,
-    ) -> Result<Option<Box<Vec<u8>>>, std::io::Error> {
+    pub fn read_chunk(&mut self, r: &mut std::io::Read) -> Result<Option<Vec<u8>>, std::io::Error> {
         let start_len = self.cur_vec.len();
         // We want to read directly into the current vec to avoid
         // a copy. This should be ok because we are just growing the vec
@@ -57,7 +54,7 @@ impl FixedSizeChunker {
         self.cur_vec.truncate(start_len + n_read);
 
         if self.cur_vec.len() == self.sz {
-            let mut v = Box::new(Vec::<u8>::with_capacity(self.sz));
+            let mut v = Vec::<u8>::with_capacity(self.sz);
             std::mem::swap(&mut v, &mut self.cur_vec);
             assert!(v.len() == self.sz);
             Ok(Some(v))
@@ -66,8 +63,8 @@ impl FixedSizeChunker {
         }
     }
 
-    pub fn finish(self) -> Option<Box<Vec<u8>>> {
-        if self.cur_vec.len() == 0 {
+    pub fn finish(self) -> Option<Vec<u8>> {
+        if self.cur_vec.is_empty() {
             None
         } else {
             assert!(self.cur_vec.len() < self.sz);
@@ -86,7 +83,7 @@ fn test_add_bytes() {
     }
 
     match ch.add_bytes(b"bc") {
-        (1, Some(v)) => assert_eq!(*v, b"ab"),
+        (1, Some(v)) => assert_eq!(v, b"ab"),
         v => panic!("{:?}", v),
     }
 
@@ -96,7 +93,7 @@ fn test_add_bytes() {
     }
 
     match ch.finish() {
-        Some(v) => assert_eq!(*v, b"c"),
+        Some(v) => assert_eq!(v, b"c"),
         v => panic!("{:?}", v),
     }
 }
@@ -109,7 +106,7 @@ fn test_read_chunk() {
     let mut cur = Cursor::new(b"abc");
 
     match ch.read_chunk(&mut cur).unwrap() {
-        Some(v) => assert_eq!(*v, b"ab"),
+        Some(v) => assert_eq!(v, b"ab"),
         v => panic!("{:?}", v),
     }
 
@@ -119,7 +116,7 @@ fn test_read_chunk() {
     }
 
     match ch.finish() {
-        Some(v) => assert_eq!(*v, b"c"),
+        Some(v) => assert_eq!(v, b"c"),
         v => panic!("{:?}", v),
     }
 }
