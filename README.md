@@ -1,11 +1,20 @@
 # [packnback](https://packnback.github.io)
 
 *packnback* aims to be a reliable, high performance, open source, security conscious backup and storage
-tool supporting client side encryption and deduplication.
+tool.
 
 # Aspirations
 
-Some aspirations for the project, we aren't there yet, but it is the end goal.
+Some aspirations for the project, we aren't there yet, but what we are striving for.
+
+## Client side encryption
+
+Once data leaves a client, nobody but the backup administrator can read backup contents, not even
+the client who sent the data.
+
+## Data deduplication
+
+Duplicated data is stored only once with each backup being a full snapshot.
 
 ## Clear and strong security mechanisms.
 
@@ -15,10 +24,8 @@ both strong cryptography and access controls.
 
 ## Paranoid testing
 
-We aim for total testing of all code paths in the data write/upload path, using fault injection and testing of 
-conditions such as out of disk space and out of memory.
-
-Sacrificing feature development speed is acceptable if it means a user never loses data due to our code.
+We aim for total testing of all code paths in the data write/upload path. Nobody should lose backups
+due to a bug in our code.
 
 # Roadmap
 
