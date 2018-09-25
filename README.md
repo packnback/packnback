@@ -5,7 +5,7 @@ tool.
 
 # Aspirations
 
-Some aspirations for the project, we aren't there yet, but what we are striving for.
+Some aspirations for the project, what we are striving for.
 
 ## Client side encryption
 
