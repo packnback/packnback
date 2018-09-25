@@ -2,17 +2,11 @@
 
 pub type __uint8_t = ::std::os::raw::c_uchar;
 pub type __uint32_t = ::std::os::raw::c_uint;
-extern "C" {
-    #[link_name = "\u{1}Hacl_SHA2_256_size_hash"]
-    pub static mut Hacl_SHA2_256_size_hash: u32;
+extern "C" {# [ link_name = "\u{1}Hacl_SHA2_256_size_hash" ]    pub static mut Hacl_SHA2_256_size_hash: u32;
 }
-extern "C" {
-    #[link_name = "\u{1}Hacl_SHA2_256_size_block"]
-    pub static mut Hacl_SHA2_256_size_block: u32;
+extern "C" {# [ link_name = "\u{1}Hacl_SHA2_256_size_block" ]    pub static mut Hacl_SHA2_256_size_block: u32;
 }
-extern "C" {
-    #[link_name = "\u{1}Hacl_SHA2_256_size_state"]
-    pub static mut Hacl_SHA2_256_size_state: u32;
+extern "C" {# [ link_name = "\u{1}Hacl_SHA2_256_size_state" ]    pub static mut Hacl_SHA2_256_size_state: u32;
 }
 extern "C" {
     pub fn Hacl_SHA2_256_init(state: *mut u32);

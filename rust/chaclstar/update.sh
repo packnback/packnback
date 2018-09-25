@@ -39,4 +39,5 @@ EOF
 
 bindgen ./c/haclnacl.h --whitelist-function "crypto_.*" --whitelist-var  "crypto_.*" > src/nacl.rs
 bindgen ./c/Hacl_SHA2_256.h --whitelist-function "Hacl_.*" --whitelist-var  "Hacl_.*" > src/sha2_256.rs
+bindgen ./c/Hacl_HMAC_SHA2_256.h --whitelist-function "Hacl_.*" --whitelist-var  "Hacl_.*" > src/hmac_sha2_256.rs
 rustfmt src/nacl.rs

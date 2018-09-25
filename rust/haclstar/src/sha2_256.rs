@@ -58,7 +58,7 @@ impl Sha2_256 {
     }
 
     pub fn finish(mut self) -> [u8; HACL_SHA2_256_SIZE_HASH] {
-        unsafe { assert!(sha2_256::Hacl_SHA2_256_size_hash as usize == HACL_SHA2_256_SIZE_HASH) };
+        assert!(unsafe { sha2_256::Hacl_SHA2_256_size_hash as usize } == HACL_SHA2_256_SIZE_HASH);
         let mut hash: [u8; HACL_SHA2_256_SIZE_HASH] = [0; HACL_SHA2_256_SIZE_HASH];
         unsafe {
             sha2_256::Hacl_SHA2_256_update_last(
