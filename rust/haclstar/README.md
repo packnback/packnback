@@ -10,8 +10,6 @@ This library aims to provide as minimal wrapping around the native API as possib
 still being safe and relatively convenient to use from rust. 
 For now these wrappers will only maintain the minimal subset of the API required by packnback.
 
-This library compiles the c code using the cc crate.
-
 # Additions or changes from native API
 
 - Rust naming conventions for types.
