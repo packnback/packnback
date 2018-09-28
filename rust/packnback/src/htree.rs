@@ -152,15 +152,34 @@ impl Sink for HashMap<Address, Vec<u8>> {
     }
 }
 
+// XXX Consider making tests table based, lots of repetition?
+// Sometimes explicit tests are nice for line numbers and test names.
+
 #[test]
-fn test_write_single_level() {
+fn test_write_no_level() {
     let mut chunks = HashMap::<Address, Vec<u8>>::new();
     // Chunks that can only fit two addresses.
-    // Split mask always is never successful.
+    // Split mask that is never successful.
     let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
 
-    tw.add([0; ADDRESS_SZ], vec![]).unwrap();
-    tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
+    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
+    let result = tw.finish().unwrap();
+
+    // root = chunk1
+    assert_eq!(chunks.len(), 1);
+    let addr_chunk = chunks.get_mut(&result).unwrap();
+    assert_eq!(addr_chunk.len(), 0);
+}
+
+#[test]
+fn test_write_shape_single_level() {
+    let mut chunks = HashMap::<Address, Vec<u8>>::new();
+    // Chunks that can only fit two addresses.
+    // Split mask is never successful.
+    let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
+
+    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
+    tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
 
     let result = tw.finish().unwrap();
 
@@ -168,24 +187,20 @@ fn test_write_single_level() {
     // root = [hdr .. chunk1 .. chunk2 ]
     // chunk1, chunk2
     assert_eq!(chunks.len(), 3);
-    assert_eq!(chunks.get_mut(&[0; ADDRESS_SZ]).unwrap(), &vec![]);
-    assert_eq!(chunks.get_mut(&[1; ADDRESS_SZ]).unwrap(), &vec![0]);
-
     let addr_chunk = chunks.get_mut(&result).unwrap();
-
     assert_eq!(addr_chunk.len(), 2 * ADDRESS_SZ + HDR_SZ);
 }
 
 #[test]
-fn test_write_two_levels() {
+fn test_write_shape_two_levels() {
     let mut chunks = HashMap::<Address, Vec<u8>>::new();
     // Chunks that can only fit two addresses.
     // Split mask always is never successful.
     let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
 
-    tw.add([0; ADDRESS_SZ], vec![]).unwrap();
-    tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
-    tw.add([2; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
+    tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
+    tw.add([3; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
 
     let result = tw.finish().unwrap();
 
@@ -194,20 +209,19 @@ fn test_write_two_levels() {
     // address2 = [hdr .. chunk3 ]
     // chunk0, chunk1, chunk3
     assert_eq!(chunks.len(), 6);
-
     let addr_chunk = chunks.get_mut(&result).unwrap();
     assert_eq!(addr_chunk.len(), 2 * ADDRESS_SZ + HDR_SZ);
 }
 
 #[test]
-fn test_write_single_level_content_split() {
+fn test_write_shape_single_level_content_split() {
     let mut chunks = HashMap::<Address, Vec<u8>>::new();
     // Allow large chunks.
     // Split mask always is successful.
     let mut tw = TreeWriter::new(&mut chunks, SENSIBLE_ADDR_MAX_CHUNK_SIZE, [0; 32]);
 
-    tw.add([0; ADDRESS_SZ], vec![]).unwrap();
-    tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
+    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
+    tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
 
     let result = tw.finish().unwrap();
 
@@ -215,24 +229,20 @@ fn test_write_single_level_content_split() {
     // root = [hdr .. chunk1 .. chunk2 ]
     // chunk1, chunk2
     assert_eq!(chunks.len(), 3);
-    assert_eq!(chunks.get_mut(&[0; ADDRESS_SZ]).unwrap(), &vec![]);
-    assert_eq!(chunks.get_mut(&[1; ADDRESS_SZ]).unwrap(), &vec![0]);
-
     let addr_chunk = chunks.get_mut(&result).unwrap();
-
     assert_eq!(addr_chunk.len(), 2 * ADDRESS_SZ + HDR_SZ);
 }
 
 #[test]
-fn test_write_two_levels_content_split() {
+fn test_write_shape_two_levels_content_split() {
     let mut chunks = HashMap::<Address, Vec<u8>>::new();
     // Allow large chunks.
     // Split mask that is always successful.
     let mut tw = TreeWriter::new(&mut chunks, SENSIBLE_ADDR_MAX_CHUNK_SIZE, [0; 32]);
 
-    tw.add([0; ADDRESS_SZ], vec![]).unwrap();
-    tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
-    tw.add([2; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
+    tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
+    tw.add([3; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
 
     let result = tw.finish().unwrap();
 
@@ -241,7 +251,6 @@ fn test_write_two_levels_content_split() {
     // address2 = [hdr .. chunk3 ]
     // chunk0, chunk1, chunk3
     assert_eq!(chunks.len(), 6);
-
     let addr_chunk = chunks.get_mut(&result).unwrap();
     assert_eq!(addr_chunk.len(), 2 * ADDRESS_SZ + HDR_SZ);
 }
