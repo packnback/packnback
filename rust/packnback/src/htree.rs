@@ -406,12 +406,15 @@ fn test_tree_walker() {
 
     // First address is already counted
     let mut count = 1;
+    let mut leaf_count = 0;
 
     loop {
         match tw.next_addr().unwrap() {
             Some((a, is_leaf)) => {
                 count += 1;
-                if !is_leaf {
+                if is_leaf {
+                    leaf_count += 1;
+                } else {
                     tw.push_addr(a).unwrap();
                 }
             }
@@ -421,5 +424,10 @@ fn test_tree_walker() {
         }
     }
 
+    // root = [hdr .. address1 .. address2 ]
+    // address1 = [hdr .. chunk0 .. chunk1 ]
+    // address2 = [hdr .. chunk3 ]
+    // chunk0, chunk1, chunk3
     assert_eq!(count, 6);
+    assert_eq!(leaf_count, 3);
 }
