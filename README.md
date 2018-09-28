@@ -32,8 +32,8 @@ due to a bug in our code.
 ...
 
 - ~~[Choose programming language](https://packnback.github.io/blog/programming_languages/).~~ Rust
-- Get small portable nacl implementation. - Wrapping hacl-star.
-- Reimplement [asymcrypt](https://packnback.github.io/blog/asymmetric_encryption/) in rust, probably improving the spec.
+- ~~Get small portable nacl implementation. - Wrapping hacl-star.~~
+- ~~Reimplement [asymcrypt](https://packnback.github.io/blog/asymmetric_encryption/) in rust, probably improving the spec.~~
 
 ...
 
@@ -51,6 +51,11 @@ due to a bug in our code.
 ...
 
 - Working software.
+
+# Contact
+
+## irc
+```#packnback at chat.freenode.net```
 
 # Donating
 
