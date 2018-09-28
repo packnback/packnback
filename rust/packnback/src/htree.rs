@@ -189,7 +189,7 @@ impl From<std::io::Error> for HTreeError {
 pub struct TreeReader<'a> {
     source: &'a mut Source,
     tree_blocks: Vec<Vec<u8>>,
-    heights: Vec<u16>,
+    tree_heights: Vec<u16>,
     read_offsets: Vec<usize>,
 }
 
@@ -198,7 +198,7 @@ impl<'a> TreeReader<'a> {
         TreeReader {
             source,
             tree_blocks: Vec::new(),
-            heights: Vec::new(),
+            tree_heights: Vec::new(),
             read_offsets: Vec::new(),
         }
     }
@@ -224,13 +224,13 @@ impl<'a> TreeReader<'a> {
             return Err(HTreeError::CorruptOrTamperedDataError);
         }
         let height = self.next_be_16()?;
-        self.heights.push(height);
+        self.tree_heights.push(height);
         Ok(())
     }
 
     fn pop(&mut self) {
         self.tree_blocks.pop();
-        self.heights.pop();
+        self.tree_heights.pop();
         self.read_offsets.pop();
     }
 
@@ -242,7 +242,7 @@ impl<'a> TreeReader<'a> {
             }
 
             let data = self.tree_blocks.last().unwrap();
-            let height = self.heights.last().unwrap();
+            let height = self.tree_heights.last().unwrap();
             let read_offset = self.read_offsets.last_mut().unwrap();
             let remaining = &data[*read_offset..];
 

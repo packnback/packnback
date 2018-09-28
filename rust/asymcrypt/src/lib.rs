@@ -1,19 +1,53 @@
 extern crate haclstar;
 use haclstar::nacl::*;
-use haclstar::sha2_256::*;
+use rand::{OsRng, RngCore};
 use std::error;
 use std::fmt;
 
+const KEY_ID_SIZE: usize = 32;
+const RANDOM_KEY_SIZE: usize = 32;
+
+#[derive(Default)]
+pub struct RandomKey {
+    bytes: [u8; RANDOM_KEY_SIZE],
+}
+
+fn fill_random(b: &mut [u8]) {
+    let mut rng = OsRng::new().expect("Error opening random number generator");
+    rng.fill_bytes(b);
+}
+
+impl RandomKey {
+    fn new() -> Box<RandomKey> {
+        let mut k = Box::<RandomKey>::new(RandomKey {
+            bytes: [0; RANDOM_KEY_SIZE],
+        });
+        fill_random(&mut k.bytes);
+        k
+    }
+}
+
+impl Drop for RandomKey {
+    fn drop(&mut self) {
+        // XXX This may be optimized away, how to ensure wiping of memory
+        // It is not totally critical but nice to have.
+        self.bytes = [0; RANDOM_KEY_SIZE as usize];
+    }
+}
+
 #[derive(Default)]
 pub struct Key {
+    pub key_id: [u8; KEY_ID_SIZE],
     pub box_sk: Box<CryptoBoxSk>,
     pub box_pk: CryptoBoxPk,
     pub sign_sk: Box<CryptoSignSk>,
     pub sign_pk: CryptoSignPk,
+    pub random_k: Box<RandomKey>,
 }
 
 #[derive(Default)]
 pub struct PublicKey {
+    pub key_id: [u8; KEY_ID_SIZE],
     pub box_pk: CryptoBoxPk,
     pub sign_pk: CryptoSignPk,
 }
@@ -24,23 +58,22 @@ impl Key {
     pub fn new() -> Key {
         let (box_pk, box_sk) = crypto_box_keypair();
         let (sign_pk, sign_sk) = crypto_sign_keypair();
+        let random_k = RandomKey::new();
+        let mut key_id: [u8; KEY_ID_SIZE] = [0; KEY_ID_SIZE];
+        fill_random(&mut key_id);
         Key {
+            key_id,
             box_pk,
             box_sk,
             sign_pk,
             sign_sk,
+            random_k,
         }
-    }
-
-    pub fn id(&self) -> KeyID {
-        let mut s = Sha2_256::new();
-        s.update(&self.box_pk.bytes);
-        s.update(&self.sign_pk.bytes);
-        s.finish()
     }
 
     pub fn pub_key(&self) -> PublicKey {
         PublicKey {
+            key_id: self.key_id.clone(),
             box_pk: self.box_pk.clone(),
             sign_pk: self.sign_pk.clone(),
         }
@@ -48,6 +81,7 @@ impl Key {
 
     pub fn write(&self, w: &mut std::io::Write) -> Result<(), std::io::Error> {
         write_header(w, KEYHEADER)?;
+        w.write_all(&self.key_id)?;
         w.write_all(&self.box_pk.bytes)?;
         w.write_all(&self.box_sk.bytes)?;
         w.write_all(&self.sign_pk.bytes)?;
@@ -55,9 +89,10 @@ impl Key {
         Ok(())
     }
 
-    pub fn read_boxed_from(r: &mut std::io::Read) -> Result<Key, AsymcryptError> {
+    pub fn read_from(r: &mut std::io::Read) -> Result<Key, AsymcryptError> {
         expect_header(r, KEYHEADER)?;
         let mut k: Key = Default::default();
+        r.read_exact(&mut k.key_id)?;
         r.read_exact(&mut k.box_pk.bytes)?;
         r.read_exact(&mut k.box_sk.bytes)?;
         r.read_exact(&mut k.sign_pk.bytes)?;
@@ -67,18 +102,21 @@ impl Key {
 }
 
 impl PublicKey {
-    pub fn id(&self) -> KeyID {
-        let mut s = Sha2_256::new();
-        s.update(&self.box_pk.bytes);
-        s.update(&self.sign_pk.bytes);
-        s.finish()
-    }
-
     pub fn write(&self, w: &mut std::io::Write) -> Result<(), std::io::Error> {
         write_header(w, PUBKEYHEADER)?;
+        w.write_all(&self.key_id)?;
         w.write_all(&self.box_pk.bytes)?;
         w.write_all(&self.sign_pk.bytes)?;
         Ok(())
+    }
+
+    pub fn read_from(r: &mut std::io::Read) -> Result<PublicKey, AsymcryptError> {
+        expect_header(r, PUBKEYHEADER)?;
+        let mut k: PublicKey = Default::default();
+        r.read_exact(&mut k.key_id)?;
+        r.read_exact(&mut k.box_pk.bytes)?;
+        r.read_exact(&mut k.sign_pk.bytes)?;
+        Ok(k)
     }
 }
 
@@ -224,6 +262,14 @@ fn read_exact_or_eof(r: &mut std::io::Read, mut buf: &mut [u8]) -> Result<usize,
 
 const DATA_BLOCK_SZ: usize = 16384;
 
+pub fn encrypted_size(in_size: usize) -> usize {
+    let n_blocks = (in_size / DATA_BLOCK_SZ) + if (in_size % DATA_BLOCK_SZ) == 0 { 0 } else { 1 };
+    let header_sz = MAGIC_LEN + 2 /*version*/ + 2 /*val_type*/ + CRYPTO_BOX_PUBLICKEYBYTES + KEY_ID_SIZE + CRYPTO_BOX_NONCEBYTES;
+    header_sz
+        + (CRYPTO_BOX_ZEROBYTES + 2 /*msg bytes*/ + DATA_BLOCK_SZ - CRYPTO_BOX_BOXZEROBYTES)
+            * n_blocks
+}
+
 pub fn encrypt(
     in_data: &mut std::io::Read,
     out_data: &mut std::io::Write,
@@ -237,7 +283,7 @@ pub fn encrypt(
 
     write_header(out_data, CIPHERTEXTHEADER)?;
     out_data.write_all(&ephemeral_pk.bytes)?;
-    out_data.write_all(&to_key.id())?;
+    out_data.write_all(&to_key.key_id)?;
     out_data.write_all(&nonce.bytes)?;
 
     loop {
@@ -285,7 +331,7 @@ pub fn decrypt(
     in_data.read_exact(&mut recipient_kid)?;
     in_data.read_exact(&mut nonce.bytes)?;
 
-    if recipient_kid != key.id() {
+    if recipient_kid != key.key_id {
         return Err(AsymcryptError::DecryptKeyMismatchError);
     }
 
@@ -328,6 +374,8 @@ fn test_encrypt_decrypt() {
 
     encrypt(&mut pt_cursor, &mut ct_cursor, &key.pub_key()).unwrap();
 
+    assert_eq!(ct_cursor.get_ref().len(), encrypted_size(SZ));
+
     pt_cursor.set_position(0);
     ct_cursor.set_position(0);
 
@@ -351,6 +399,8 @@ fn test_encrypt_decrypt_tampered() {
     let mut ct_cursor = Cursor::new(Vec::new());
 
     encrypt(&mut pt_cursor, &mut ct_cursor, &key.pub_key()).unwrap();
+
+    assert_eq!(ct_cursor.get_ref().len(), encrypted_size(SZ));
 
     pt_cursor.set_position(0);
     ct_cursor.set_position(0);
@@ -378,6 +428,8 @@ fn test_encrypt_decrypt_wrong_key() {
     let mut ct_cursor = Cursor::new(Vec::new());
 
     encrypt(&mut pt_cursor, &mut ct_cursor, &key.pub_key()).unwrap();
+
+    assert_eq!(ct_cursor.get_ref().len(), encrypted_size(SZ));
 
     let key = Key::new();
 

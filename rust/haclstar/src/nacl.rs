@@ -4,13 +4,18 @@ extern crate rand;
 use chaclstar::nacl;
 use rand::{OsRng, RngCore};
 
-pub const CRYPTO_SIGN_BYTES: usize = nacl::crypto_sign_BYTES as usize;
 pub const CRYPTO_BOX_ZEROBYTES: usize = nacl::crypto_box_ZEROBYTES as usize;
 pub const CRYPTO_BOX_BOXZEROBYTES: usize = nacl::crypto_box_BOXZEROBYTES as usize;
+pub const CRYPTO_BOX_NONCEBYTES: usize = nacl::crypto_box_NONCEBYTES as usize;
+pub const CRYPTO_BOX_PUBLICKEYBYTES: usize = nacl::crypto_box_PUBLICKEYBYTES as usize;
+pub const CRYPTO_BOX_SECRETKEYBYTES: usize = nacl::crypto_box_SECRETKEYBYTES as usize;
+pub const CRYPTO_SIGN_PUBLICKEYBYTES: usize = nacl::crypto_sign_PUBLICKEYBYTES as usize;
+pub const CRYPTO_SIGN_SECRETKEYBYTES: usize = nacl::crypto_sign_SECRETKEYBYTES as usize;
+pub const CRYPTO_SIGN_BYTES: usize = nacl::crypto_sign_BYTES as usize;
 
 #[derive(Clone, Default)]
 pub struct CryptoBoxNonce {
-    pub bytes: [u8; nacl::crypto_box_NONCEBYTES as usize],
+    pub bytes: [u8; CRYPTO_BOX_NONCEBYTES as usize],
 }
 
 impl CryptoBoxNonce {
@@ -34,7 +39,7 @@ impl CryptoBoxNonce {
 
 #[derive(Clone, Default)]
 pub struct CryptoBoxPk {
-    pub bytes: [u8; nacl::crypto_box_PUBLICKEYBYTES as usize],
+    pub bytes: [u8; CRYPTO_BOX_PUBLICKEYBYTES as usize],
 }
 
 #[derive(Default)]
@@ -46,7 +51,7 @@ impl Drop for CryptoBoxSk {
     fn drop(&mut self) {
         // XXX This may be optimized away, how to ensure wiping of memory
         // It is not totally critical but nice to have.
-        self.bytes = [0; nacl::crypto_box_SECRETKEYBYTES as usize];
+        self.bytes = [0; CRYPTO_BOX_SECRETKEYBYTES as usize];
     }
 }
 
@@ -61,17 +66,17 @@ pub fn crypto_box_keypair() -> (CryptoBoxPk, Box<CryptoBoxSk>) {
 
 #[derive(Clone, Default)]
 pub struct CryptoSignPk {
-    pub bytes: [u8; nacl::crypto_sign_PUBLICKEYBYTES as usize],
+    pub bytes: [u8; CRYPTO_SIGN_PUBLICKEYBYTES as usize],
 }
 
 pub struct CryptoSignSk {
-    pub bytes: [u8; nacl::crypto_sign_SECRETKEYBYTES as usize],
+    pub bytes: [u8; CRYPTO_SIGN_SECRETKEYBYTES as usize],
 }
 
 impl Default for CryptoSignSk {
     fn default() -> CryptoSignSk {
         CryptoSignSk {
-            bytes: [0; nacl::crypto_sign_SECRETKEYBYTES as usize],
+            bytes: [0; CRYPTO_SIGN_SECRETKEYBYTES as usize],
         }
     }
 }
@@ -80,7 +85,7 @@ impl Drop for CryptoSignSk {
     fn drop(&mut self) {
         // XXX This may be optimized away, how to ensure wiping of memory
         // It is not totally critical but nice to have.
-        self.bytes = [0; nacl::crypto_sign_SECRETKEYBYTES as usize];
+        self.bytes = [0; CRYPTO_SIGN_SECRETKEYBYTES as usize];
     }
 }
 
@@ -95,7 +100,7 @@ pub fn crypto_sign_keypair() -> (CryptoSignPk, Box<CryptoSignSk>) {
 
 pub fn crypto_sign(sm: &mut [u8], m: &[u8], sk: &CryptoSignSk) -> usize {
     // Contract from nacl api.
-    assert!(sm.len() >= m.len() + nacl::crypto_sign_BYTES as usize);
+    assert!(sm.len() >= m.len() + CRYPTO_SIGN_BYTES as usize);
 
     let mut smsz: u64 = 0;
 
@@ -139,8 +144,8 @@ pub fn crypto_sign_open(m: &mut [u8], sm: &[u8], pk: &CryptoSignPk) -> Option<us
 pub fn crypto_box(c: &mut [u8], m: &[u8], n: &CryptoBoxNonce, pk: &CryptoBoxPk, sk: &CryptoBoxSk) {
     // Contract from nacl api.
     assert!(c.len() >= m.len());
-    assert!(m.len() >= nacl::crypto_box_ZEROBYTES as usize);
-    for b in m.iter().take(nacl::crypto_box_ZEROBYTES as usize) {
+    assert!(m.len() >= CRYPTO_BOX_ZEROBYTES as usize);
+    for b in m.iter().take(CRYPTO_BOX_ZEROBYTES as usize) {
         assert!(*b == 0);
     }
 
@@ -167,9 +172,9 @@ pub fn crypto_box_open(
 ) -> bool {
     // Contract from nacl api.
     assert!(m.len() >= c.len());
-    assert!(c.len() >= nacl::crypto_box_BOXZEROBYTES as usize);
+    assert!(c.len() >= CRYPTO_BOX_BOXZEROBYTES as usize);
 
-    for b in m.iter().take(nacl::crypto_box_BOXZEROBYTES as usize) {
+    for b in m.iter().take(CRYPTO_BOX_BOXZEROBYTES as usize) {
         assert!(*b == 0);
     }
 
@@ -189,7 +194,7 @@ pub fn crypto_box_open(
 
 #[test]
 fn test_crypto_box() {
-    const MSIZE: usize = (nacl::crypto_box_BOXZEROBYTES + 128) as usize;
+    const MSIZE: usize = (CRYPTO_BOX_BOXZEROBYTES + 128) as usize;
     let mut m1: [u8; MSIZE] = [3; MSIZE];
     let mut m2: [u8; MSIZE] = [0; MSIZE];
     let mut c: [u8; MSIZE] = [0; MSIZE];
@@ -197,23 +202,23 @@ fn test_crypto_box() {
     let (pk, sk) = crypto_box_keypair();
     let n = CryptoBoxNonce::new();
 
-    for i in 0..nacl::crypto_box_ZEROBYTES {
+    for i in 0..CRYPTO_BOX_ZEROBYTES {
         m1[i as usize] = 0;
     }
     crypto_box(&mut c[..], &m1, &n, &pk, &sk);
 
-    for i in 0..(nacl::crypto_box_BOXZEROBYTES as usize) {
+    for i in 0..(CRYPTO_BOX_BOXZEROBYTES as usize) {
         assert!(c[i] == 0);
     }
 
     assert!(crypto_box_open(&mut m2[..], &c, &n, &pk, &sk));
     assert_eq!(
-        m1[(nacl::crypto_box_ZEROBYTES as usize)..],
-        m2[(nacl::crypto_box_ZEROBYTES as usize)..]
+        m1[(CRYPTO_BOX_ZEROBYTES as usize)..],
+        m2[(CRYPTO_BOX_ZEROBYTES as usize)..]
     );
 
     // corrupt/tamper
-    let corrupt_at = (nacl::crypto_box_BOXZEROBYTES + 1) as usize;
+    let corrupt_at = (CRYPTO_BOX_BOXZEROBYTES + 1) as usize;
     c[corrupt_at] = !c[corrupt_at];
     assert!(crypto_box_open(&mut m2[..], &c, &n, &pk, &sk) == false);
 }
