@@ -37,7 +37,7 @@ impl Drop for RandomKey {
 
 #[derive(Default)]
 pub struct Key {
-    pub key_id: [u8; KEY_ID_SIZE],
+    pub id: [u8; KEY_ID_SIZE],
     pub box_sk: Box<CryptoBoxSk>,
     pub box_pk: CryptoBoxPk,
     pub sign_sk: Box<CryptoSignSk>,
@@ -47,7 +47,7 @@ pub struct Key {
 
 #[derive(Default)]
 pub struct PublicKey {
-    pub key_id: [u8; KEY_ID_SIZE],
+    pub id: [u8; KEY_ID_SIZE],
     pub box_pk: CryptoBoxPk,
     pub sign_pk: CryptoSignPk,
 }
@@ -59,10 +59,10 @@ impl Key {
         let (box_pk, box_sk) = crypto_box_keypair();
         let (sign_pk, sign_sk) = crypto_sign_keypair();
         let random_k = RandomKey::new();
-        let mut key_id: [u8; KEY_ID_SIZE] = [0; KEY_ID_SIZE];
-        fill_random(&mut key_id);
+        let mut id: [u8; KEY_ID_SIZE] = [0; KEY_ID_SIZE];
+        fill_random(&mut id);
         Key {
-            key_id,
+            id,
             box_pk,
             box_sk,
             sign_pk,
@@ -73,7 +73,7 @@ impl Key {
 
     pub fn pub_key(&self) -> PublicKey {
         PublicKey {
-            key_id: self.key_id.clone(),
+            id: self.id.clone(),
             box_pk: self.box_pk.clone(),
             sign_pk: self.sign_pk.clone(),
         }
@@ -81,7 +81,7 @@ impl Key {
 
     pub fn write(&self, w: &mut std::io::Write) -> Result<(), std::io::Error> {
         write_header(w, KEYHEADER)?;
-        w.write_all(&self.key_id)?;
+        w.write_all(&self.id)?;
         w.write_all(&self.box_pk.bytes)?;
         w.write_all(&self.box_sk.bytes)?;
         w.write_all(&self.sign_pk.bytes)?;
@@ -92,7 +92,7 @@ impl Key {
     pub fn read_from(r: &mut std::io::Read) -> Result<Key, AsymcryptError> {
         expect_header(r, KEYHEADER)?;
         let mut k: Key = Default::default();
-        r.read_exact(&mut k.key_id)?;
+        r.read_exact(&mut k.id)?;
         r.read_exact(&mut k.box_pk.bytes)?;
         r.read_exact(&mut k.box_sk.bytes)?;
         r.read_exact(&mut k.sign_pk.bytes)?;
@@ -104,7 +104,7 @@ impl Key {
 impl PublicKey {
     pub fn write(&self, w: &mut std::io::Write) -> Result<(), std::io::Error> {
         write_header(w, PUBKEYHEADER)?;
-        w.write_all(&self.key_id)?;
+        w.write_all(&self.id)?;
         w.write_all(&self.box_pk.bytes)?;
         w.write_all(&self.sign_pk.bytes)?;
         Ok(())
@@ -113,7 +113,7 @@ impl PublicKey {
     pub fn read_from(r: &mut std::io::Read) -> Result<PublicKey, AsymcryptError> {
         expect_header(r, PUBKEYHEADER)?;
         let mut k: PublicKey = Default::default();
-        r.read_exact(&mut k.key_id)?;
+        r.read_exact(&mut k.id)?;
         r.read_exact(&mut k.box_pk.bytes)?;
         r.read_exact(&mut k.sign_pk.bytes)?;
         Ok(k)
@@ -283,7 +283,7 @@ pub fn encrypt(
 
     write_header(out_data, CIPHERTEXTHEADER)?;
     out_data.write_all(&ephemeral_pk.bytes)?;
-    out_data.write_all(&to_key.key_id)?;
+    out_data.write_all(&to_key.id)?;
     out_data.write_all(&nonce.bytes)?;
 
     loop {
@@ -331,7 +331,7 @@ pub fn decrypt(
     in_data.read_exact(&mut recipient_kid)?;
     in_data.read_exact(&mut nonce.bytes)?;
 
-    if recipient_kid != key.key_id {
+    if recipient_kid != key.id {
         return Err(AsymcryptError::DecryptKeyMismatchError);
     }
 
