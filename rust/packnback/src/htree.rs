@@ -34,121 +34,6 @@ fn be_bytes_to_u16(hi: u8, lo: u8) -> u16 {
     (u16::from(hi) << 8) | u16::from(lo)
 }
 
-#[derive(Debug)]
-pub enum HTreeError {
-    CorruptOrTamperedDataError,
-    // This is not an option because it should not really happen.
-    DataMissing,
-    IOError(std::io::Error),
-}
-
-impl fmt::Display for HTreeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            HTreeError::CorruptOrTamperedDataError => write!(
-                f,
-                "The 'htree' data structure input data is not in the expected format or corrupt."
-            ),
-            HTreeError::DataMissing => {
-                write!(f, "The data store does not contain the requested data.")
-            }
-            HTreeError::IOError(ref e) => e.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for HTreeError {
-    fn cause(&self) -> Option<&std::error::Error> {
-        match *self {
-            HTreeError::IOError(ref e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<std::io::Error> for HTreeError {
-    fn from(err: std::io::Error) -> HTreeError {
-        HTreeError::IOError(err)
-    }
-}
-
-pub struct TreeWalker<'a> {
-    source: &'a mut Source,
-    tree_blocks: Vec<Vec<u8>>,
-    heights: Vec<u16>,
-    read_offsets: Vec<usize>,
-}
-
-impl<'a> TreeWalker<'a> {
-    pub fn new(source: &'a mut Source) -> TreeWalker<'a> {
-        TreeWalker {
-            source,
-            tree_blocks: Vec::new(),
-            heights: Vec::new(),
-            read_offsets: Vec::new(),
-        }
-    }
-
-    fn next_be_16(&mut self) -> Result<u16, HTreeError> {
-        let data = self.tree_blocks.last().unwrap();
-        let read_offset = self.read_offsets.last_mut().unwrap();
-        let remaining = &data[*read_offset..];
-        if remaining.len() < 2 {
-            return Err(HTreeError::CorruptOrTamperedDataError);
-        }
-        let v = be_bytes_to_u16(remaining[0], remaining[1]);
-        *read_offset += 2;
-        Ok(v)
-    }
-
-    pub fn push_addr(&mut self, addr: Address) -> Result<(), HTreeError> {
-        let data = self.source.get_chunk(addr)?;
-        self.tree_blocks.push(data);
-        self.read_offsets.push(0);
-        let header_type = self.next_be_16()?;
-        if header_type != TYPE_TREE {
-            return Err(HTreeError::CorruptOrTamperedDataError);
-        }
-        let height = self.next_be_16()?;
-        self.heights.push(height);
-        Ok(())
-    }
-
-    fn pop(&mut self) {
-        self.tree_blocks.pop();
-        self.heights.pop();
-        self.read_offsets.pop();
-    }
-
-    // Returns (Address, is_leaf)
-    pub fn next_addr(&mut self) -> Result<Option<(Address, bool)>, HTreeError> {
-        loop {
-            if self.tree_blocks.is_empty() {
-                return Ok(None);
-            }
-
-            let data = self.tree_blocks.last().unwrap();
-            let height = self.heights.last().unwrap();
-            let read_offset = self.read_offsets.last_mut().unwrap();
-            let remaining = &data[*read_offset..];
-
-            if remaining.is_empty() {
-                self.pop();
-                continue;
-            }
-
-            if remaining.len() < ADDRESS_SZ {
-                return Err(HTreeError::CorruptOrTamperedDataError);
-            }
-
-            let mut result: Address = [0; ADDRESS_SZ];
-            result.clone_from_slice(&remaining[0..ADDRESS_SZ]);
-            *read_offset += result.len();
-            return Ok(Some((result, *height == 0)));
-        }
-    }
-}
-
 impl<'a> TreeWriter<'a> {
     pub fn new(
         sink: &'a mut Sink,
@@ -260,6 +145,138 @@ impl<'a> TreeWriter<'a> {
         // block has at at least one address.
         assert!(self.tree_blocks.len() > 1 || self.tree_blocks[0].len() >= HDR_SZ + ADDRESS_SZ);
         Ok(self.finish_level(0)?)
+    }
+}
+
+#[derive(Debug)]
+pub enum HTreeError {
+    CorruptOrTamperedDataError,
+    // This is not an option because it should not really happen.
+    DataMissing,
+    IOError(std::io::Error),
+}
+
+impl fmt::Display for HTreeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            HTreeError::CorruptOrTamperedDataError => write!(
+                f,
+                "The 'htree' data structure input data is not in the expected format or corrupt."
+            ),
+            HTreeError::DataMissing => {
+                write!(f, "The data store does not contain the requested data.")
+            }
+            HTreeError::IOError(ref e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for HTreeError {
+    fn cause(&self) -> Option<&std::error::Error> {
+        match *self {
+            HTreeError::IOError(ref e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for HTreeError {
+    fn from(err: std::io::Error) -> HTreeError {
+        HTreeError::IOError(err)
+    }
+}
+
+pub struct TreeReader<'a> {
+    source: &'a mut Source,
+    tree_blocks: Vec<Vec<u8>>,
+    heights: Vec<u16>,
+    read_offsets: Vec<usize>,
+}
+
+impl<'a> TreeReader<'a> {
+    pub fn new(source: &'a mut Source) -> TreeReader<'a> {
+        TreeReader {
+            source,
+            tree_blocks: Vec::new(),
+            heights: Vec::new(),
+            read_offsets: Vec::new(),
+        }
+    }
+
+    fn next_be_16(&mut self) -> Result<u16, HTreeError> {
+        let data = self.tree_blocks.last().unwrap();
+        let read_offset = self.read_offsets.last_mut().unwrap();
+        let remaining = &data[*read_offset..];
+        if remaining.len() < 2 {
+            return Err(HTreeError::CorruptOrTamperedDataError);
+        }
+        let v = be_bytes_to_u16(remaining[0], remaining[1]);
+        *read_offset += 2;
+        Ok(v)
+    }
+
+    pub fn push_addr(&mut self, addr: Address) -> Result<(), HTreeError> {
+        let data = self.source.get_chunk(addr)?;
+        self.tree_blocks.push(data);
+        self.read_offsets.push(0);
+        let header_type = self.next_be_16()?;
+        if header_type != TYPE_TREE {
+            return Err(HTreeError::CorruptOrTamperedDataError);
+        }
+        let height = self.next_be_16()?;
+        self.heights.push(height);
+        Ok(())
+    }
+
+    fn pop(&mut self) {
+        self.tree_blocks.pop();
+        self.heights.pop();
+        self.read_offsets.pop();
+    }
+
+    // Returns (Address, is_leaf)
+    pub fn next_addr(&mut self) -> Result<Option<(Address, bool)>, HTreeError> {
+        loop {
+            if self.tree_blocks.is_empty() {
+                return Ok(None);
+            }
+
+            let data = self.tree_blocks.last().unwrap();
+            let height = self.heights.last().unwrap();
+            let read_offset = self.read_offsets.last_mut().unwrap();
+            let remaining = &data[*read_offset..];
+
+            if remaining.is_empty() {
+                self.pop();
+                continue;
+            }
+
+            if remaining.len() < ADDRESS_SZ {
+                return Err(HTreeError::CorruptOrTamperedDataError);
+            }
+
+            let mut result: Address = [0; ADDRESS_SZ];
+            result.clone_from_slice(&remaining[0..ADDRESS_SZ]);
+            *read_offset += result.len();
+            return Ok(Some((result, *height == 0)));
+        }
+    }
+
+    pub fn next_chunk(&mut self) -> Result<Option<(Address, Vec<u8>)>, HTreeError> {
+        loop {
+            match self.next_addr()? {
+                Some((a, is_leaf)) => {
+                    if is_leaf {
+                        return Ok(Some((a, self.source.get_chunk(a)?)));
+                    } else {
+                        self.push_addr(a)?;
+                    }
+                }
+                None => {
+                    return Ok(None);
+                }
+            }
+        }
     }
 }
 
@@ -386,7 +403,7 @@ fn test_write_shape_two_levels_content_split() {
 }
 
 #[test]
-fn test_tree_walker() {
+fn test_tree_reader_walk() {
     let mut chunks = HashMap::<Address, Vec<u8>>::new();
     let addr: Address;
 
@@ -401,21 +418,21 @@ fn test_tree_walker() {
         addr = tw.finish().unwrap();
     }
 
-    let mut tw = TreeWalker::new(&mut chunks);
-    tw.push_addr(addr).unwrap();
+    let mut tr = TreeReader::new(&mut chunks);
+    tr.push_addr(addr).unwrap();
 
     // First address is already counted
     let mut count = 1;
     let mut leaf_count = 0;
 
     loop {
-        match tw.next_addr().unwrap() {
+        match tr.next_addr().unwrap() {
             Some((a, is_leaf)) => {
                 count += 1;
                 if is_leaf {
                     leaf_count += 1;
                 } else {
-                    tw.push_addr(a).unwrap();
+                    tr.push_addr(a).unwrap();
                 }
             }
             None => {
@@ -430,4 +447,38 @@ fn test_tree_walker() {
     // chunk0, chunk1, chunk3
     assert_eq!(count, 6);
     assert_eq!(leaf_count, 3);
+}
+
+#[test]
+fn test_tree_reader_chunks() {
+    let mut chunks = HashMap::<Address, Vec<u8>>::new();
+    let addr: Address;
+
+    {
+        // Chunks that can only fit two addresses.
+        // Split mask always is never successful.
+        let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
+        tw.add([1; ADDRESS_SZ], vec![]).unwrap();
+        tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
+        tw.add([3; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+
+        addr = tw.finish().unwrap();
+    }
+
+    let mut tr = TreeReader::new(&mut chunks);
+    tr.push_addr(addr).unwrap();
+
+    let (addr, buf) = tr.next_chunk().unwrap().unwrap();
+    assert_eq!([1; ADDRESS_SZ], addr);
+    assert_eq!(buf, vec![]);
+    let (addr, buf) = tr.next_chunk().unwrap().unwrap();
+    assert_eq!([2; ADDRESS_SZ], addr);
+    assert_eq!(buf, vec![0]);
+    let (addr, buf) = tr.next_chunk().unwrap().unwrap();
+    assert_eq!([3; ADDRESS_SZ], addr);
+    assert_eq!(buf, vec![1, 2, 3]);
+
+    if let Some(_) = tr.next_chunk().unwrap() {
+        panic!("expected eof")
+    }
 }
