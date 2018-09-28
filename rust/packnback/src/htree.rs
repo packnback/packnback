@@ -1,12 +1,17 @@
-const HDR_SZ: usize = 3;
+use haclstar::sha2_256;
+
+const HDR_SZ: usize = 4;
 const ADDRESS_SZ: usize = 32;
-const MAX_ADDR_PER_BLOCK: usize = 30000;
 const TYPE_TREE: u16 = 0;
+
+// The minimum chunk size is enough for 2 addresses and a header.
+pub const MINIMUM_ADDR_CHUNK_SIZE: usize = HDR_SZ + 2 * ADDRESS_SZ;
+pub const SENSIBLE_ADDR_MAX_CHUNK_SIZE: usize = HDR_SZ + 30000 * ADDRESS_SZ;
 
 type Address = [u8; 32];
 
 pub trait Sink {
-    fn send_chunk(&self, chunk: (Address, Vec<u8>)) -> Result<(), std::io::Error>;
+    fn send_chunk(&mut self, addr: Address, data: Vec<u8>) -> Result<(), std::io::Error>;
 }
 
 pub trait Store {
@@ -14,6 +19,7 @@ pub trait Store {
 }
 
 pub struct TreeWriter<'a> {
+    max_addr_chunk_size: usize,
     sink: &'a mut Sink,
     tree_blocks: Vec<Vec<u8>>,
 }
@@ -23,88 +29,147 @@ fn u16_be_bytes(v: u16) -> (u8, u8) {
 }
 
 impl<'a> TreeWriter<'a> {
-    pub fn new(sink: &'a mut Sink) -> TreeWriter<'a> {
+    pub fn new(sink: &'a mut Sink, max_addr_chunk_size: usize) -> TreeWriter<'a> {
+        assert!(max_addr_chunk_size >= MINIMUM_ADDR_CHUNK_SIZE);
         TreeWriter {
+            max_addr_chunk_size,
             sink,
             tree_blocks: Vec::new(),
         }
     }
 
+    fn write_header(&mut self, level: usize) {
+        if level > 0xffff {
+            panic!("tree overflow");
+        }
+        let v = &mut self.tree_blocks[level];
+        assert!(v.len() == 0);
+        let (type_hi, type_lo) = u16_be_bytes(TYPE_TREE);
+        let (height_hi, height_lo) = u16_be_bytes(level as u16);
+        v.extend(&[type_hi, type_lo, height_hi, height_lo]);
+    }
+
     fn take_and_clear_level(&mut self, level: usize) -> Vec<u8> {
-        let mut block = Vec::new();
+        let mut block = Vec::with_capacity(MINIMUM_ADDR_CHUNK_SIZE);
         std::mem::swap(&mut block, &mut self.tree_blocks[level]);
+        self.write_header(level);
         block
     }
 
     fn add_addr(&mut self, level: usize, addr: Address) -> Result<(), std::io::Error> {
-        if level > 0xffff {
-            // Return proper error.
-            panic!("tree overflow");
-        }
-
         if self.tree_blocks.len() < level + 1 {
             self.tree_blocks.push(Vec::new());
+            self.write_header(level);
         }
 
-        if self.tree_blocks[level].len() == 0 {
-            let (type_hi, type_lo) = u16_be_bytes(TYPE_TREE);
-            let (height_hi, height_lo) = u16_be_bytes(level as u16);
-            self.tree_blocks[level].extend(&[type_hi, type_lo, height_hi, height_lo]);
-        }
-
+        assert!(self.tree_blocks[level].len() >= HDR_SZ);
         self.tree_blocks[level].extend(&addr);
 
-        const MAX_SIZE: usize = HDR_SZ + (ADDRESS_SZ * MAX_ADDR_PER_BLOCK);
-        if self.tree_blocks[level].len() == MAX_SIZE {
+        // If the next add would address us over the max size, we must split here.
+        if self.tree_blocks[level].len() + ADDRESS_SZ > self.max_addr_chunk_size {
             let current_level_block = self.take_and_clear_level(level);
-            let current_block_address: Address = [0; 32]; // XXX calculate address
+            let current_block_address: Address = sha2_256::sha2_256(&current_level_block);
             self.sink
-                .send_chunk((current_block_address, current_level_block))?;
+                .send_chunk(current_block_address, current_level_block)?;
             self.add_addr(level + 1, current_block_address)?;
         }
-
-        assert!(self.tree_blocks[level].len() < MAX_SIZE);
 
         Ok(())
     }
 
-    pub fn add(&mut self, chunk: (Address, Vec<u8>)) -> Result<(), std::io::Error> {
-        let addr = chunk.0;
-        self.sink.send_chunk(chunk)?;
+    pub fn add(&mut self, addr: Address, data: Vec<u8>) -> Result<(), std::io::Error> {
+        self.sink.send_chunk(addr, data)?;
         self.add_addr(0, addr)?;
         Ok(())
     }
 
-    fn finish_level(&mut self, level: usize) -> Result<Option<Address>, std::io::Error> {
-        if self.tree_blocks.len() <= level {
-            return Ok(None);
+    fn finish_level(&mut self, level: usize) -> Result<Address, std::io::Error> {
+        if self.tree_blocks.len() - 1 == level
+            && self.tree_blocks[level].len() == HDR_SZ + ADDRESS_SZ
+        {
+            // We are the top level, and we only ever got a single address written to us.
+            // This block is actually the root address.
+            let mut result_addr: Address = [0; 32];
+            result_addr.clone_from_slice(&self.tree_blocks[level][HDR_SZ..]);
+            return Ok(result_addr);
         }
 
-        if self.tree_blocks[level].len() == 3 {
-            // Empty block, skip it.
+        assert!(self.tree_blocks[level].len() >= HDR_SZ);
+        if self.tree_blocks[level].len() == HDR_SZ {
+            // Empty block, writing it to the parent is pointless.
             return self.finish_level(level + 1);
         }
 
-        // The tree block contains whole addresses.
+        // The tree blocks must contain whole addresses.
         assert!(((self.tree_blocks[level].len() - HDR_SZ) % ADDRESS_SZ) == 0);
 
-        if self.tree_blocks[level].len() == HDR_SZ + ADDRESS_SZ {
-            let mut result_addr: Address = [0; 32];
-            result_addr.clone_from_slice(&self.tree_blocks[level][HDR_SZ..]);
-            return Ok(Some(result_addr));
-        }
-
-        // New addr = sha256
+        // Add the current block to the parent.
         let block = self.take_and_clear_level(level);
-        let current_block_address: Address = [0; 32]; // XXX calculate address
-        self.sink.send_chunk((current_block_address, block))?;
-        match self.finish_level(level + 1)? {
-            Some(addr) => Ok(Some(addr)),
-            None => Ok(Some(current_block_address)),
-        }
+        let current_block_address: Address = sha2_256::sha2_256(&block);
+        self.sink.send_chunk(current_block_address, block)?;
+        self.add_addr(level + 1, current_block_address)?;
+        Ok(self.finish_level(level + 1)?)
     }
 
     pub fn finish(mut self) -> Result<Address, std::io::Error> {
-        Ok(self.finish_level(0)?.unwrap())
+        // Its a bug to call finish without adding a single chunk.
+        // Either the number of tree_blocks grew larger than 1, or the root
+        // block has at at least one address.
+        assert!(self.tree_blocks.len() > 1 || self.tree_blocks[0].len() >= HDR_SZ + ADDRESS_SZ);
+        Ok(self.finish_level(0)?)
     }
+}
+
+use std::collections::HashMap;
+
+impl Sink for HashMap<Address, Vec<u8>> {
+    fn send_chunk(&mut self, addr: Address, data: Vec<u8>) -> Result<(), std::io::Error> {
+        self.insert(addr, data);
+        Ok(())
+    }
+}
+
+#[test]
+fn test_write_single_level() {
+    let mut chunks = HashMap::<Address, Vec<u8>>::new();
+    let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE);
+
+    tw.add([0; ADDRESS_SZ], vec![]).unwrap();
+    tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
+
+    let result = tw.finish().unwrap();
+
+    // One chunk per added. One for addresses.
+    // root = [hdr .. chunk1 .. chunk2 ]
+    // chunk1, chunk2
+    assert_eq!(chunks.len(), 3);
+
+    assert_eq!(chunks.get_mut(&[0; ADDRESS_SZ]).unwrap(), &vec![]);
+    assert_eq!(chunks.get_mut(&[1; ADDRESS_SZ]).unwrap(), &vec![0]);
+
+    let addr_chunk = chunks.get_mut(&result).unwrap();
+
+    assert_eq!(addr_chunk.len(), 2 * ADDRESS_SZ + HDR_SZ);
+}
+
+#[test]
+fn test_write_two_levels() {
+    let mut chunks = HashMap::<Address, Vec<u8>>::new();
+    // Chunks that can only fit two addresses.
+    let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE);
+
+    tw.add([0; ADDRESS_SZ], vec![]).unwrap();
+    tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
+    tw.add([2; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+
+    let result = tw.finish().unwrap();
+
+    // root = [hdr .. address1 .. address2 ]
+    // address1 = [hdr .. chunk0 .. chunk1 ]
+    // address2 = [hdr .. chunk3 ]
+    // chunk0, chunk1, chunk3
+    assert_eq!(chunks.len(), 6);
+
+    let addr_chunk = chunks.get_mut(&result).unwrap();
+    assert_eq!(addr_chunk.len(), 2 * ADDRESS_SZ + HDR_SZ);
 }

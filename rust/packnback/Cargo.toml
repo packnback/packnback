@@ -7,3 +7,6 @@ edition = "2018"
 [dependencies]
 
 clap = "*"
+
+[dependencies.haclstar]
+path = "../haclstar"
