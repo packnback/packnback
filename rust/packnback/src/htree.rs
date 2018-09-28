@@ -188,6 +188,10 @@ impl From<std::io::Error> for HTreeError {
 
 pub struct TreeReader<'a> {
     source: &'a mut Source,
+    /* for debug only */
+    last_block_parent: Address,
+    /* for debug only */
+    tree_block_address: Vec<Address>,
     tree_blocks: Vec<Vec<u8>>,
     tree_heights: Vec<u16>,
     read_offsets: Vec<usize>,
@@ -197,6 +201,8 @@ impl<'a> TreeReader<'a> {
     pub fn new(source: &'a mut Source) -> TreeReader<'a> {
         TreeReader {
             source,
+            last_block_parent: [0; ADDRESS_SZ],
+            tree_block_address: Vec::new(),
             tree_blocks: Vec::new(),
             tree_heights: Vec::new(),
             read_offsets: Vec::new(),
@@ -217,6 +223,7 @@ impl<'a> TreeReader<'a> {
 
     pub fn push_addr(&mut self, addr: Address) -> Result<(), HTreeError> {
         let data = self.source.get_chunk(addr)?;
+        self.tree_block_address.push(addr);
         self.tree_blocks.push(data);
         self.read_offsets.push(0);
         let header_type = self.next_be_16()?;
@@ -229,6 +236,7 @@ impl<'a> TreeReader<'a> {
     }
 
     fn pop(&mut self) {
+        self.tree_block_address.pop();
         self.tree_blocks.pop();
         self.tree_heights.pop();
         self.read_offsets.pop();
@@ -241,6 +249,7 @@ impl<'a> TreeReader<'a> {
                 return Ok(None);
             }
 
+            let parent_addr = self.tree_block_address.last().unwrap();
             let data = self.tree_blocks.last().unwrap();
             let height = self.tree_heights.last().unwrap();
             let read_offset = self.read_offsets.last_mut().unwrap();
@@ -258,6 +267,7 @@ impl<'a> TreeReader<'a> {
             let mut result: Address = [0; ADDRESS_SZ];
             result.clone_from_slice(&remaining[0..ADDRESS_SZ]);
             *read_offset += result.len();
+            self.last_block_parent = *parent_addr;
             return Ok(Some((result, *height == 0)));
         }
     }
@@ -278,6 +288,58 @@ impl<'a> TreeReader<'a> {
             }
         }
     }
+
+    pub fn get_chunk(&mut self, a: &Address) -> Result<Vec<u8>, HTreeError> {
+        self.source.get_chunk(*a)
+    }
+}
+
+// XXX Do this in a better way, probably format trait.
+fn debug_hex_print(buf: &[u8]) {
+    for &b in buf {
+        print!("{:02X}", b);
+    }
+}
+
+// XXX Do this in a better way, probably format trait.
+// XXX Emit to a writer trait.
+pub fn debug_emit_graphvis(source: &mut Source, addr: Address) -> () {
+    let mut tr = TreeReader::new(source);
+    tr.push_addr(addr).unwrap();
+
+    print!("digraph G {{\nnode [shape=record]\n");
+    loop {
+        match tr.next_addr().unwrap() {
+            Some((a, is_leaf)) => {
+                let parent = tr.last_block_parent;
+
+                print!("\"");
+                debug_hex_print(&parent);
+                print!("\"");
+                print!("->");
+                print!("\"");
+                debug_hex_print(&a);
+                print!("\"");
+                print!("\n");
+                debug_hex_print(&a);
+                if is_leaf {
+                    print!("\"");
+                    debug_hex_print(&a);
+                    print!("\"");
+                    print!("->");
+                    print!("\"");
+                    print!("{:?}", tr.get_chunk(&a).unwrap());
+                    print!("\"\n");
+                } else {
+                    tr.push_addr(a).unwrap();
+                }
+            }
+            None => {
+                break;
+            }
+        }
+    }
+    print!("}}\n");
 }
 
 use std::collections::HashMap;
