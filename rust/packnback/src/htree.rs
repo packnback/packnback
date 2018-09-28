@@ -49,7 +49,7 @@ impl<'a> TreeWriter<'a> {
             panic!("tree overflow");
         }
         let v = &mut self.tree_blocks[level];
-        assert!(v.len() == 0);
+        assert!(v.is_empty());
         let (type_hi, type_lo) = u16_be_bytes(TYPE_TREE);
         let (height_hi, height_lo) = u16_be_bytes(level as u16);
         v.extend(&[type_hi, type_lo, height_hi, height_lo]);
@@ -72,7 +72,7 @@ impl<'a> TreeWriter<'a> {
             }
         }
 
-        return true;
+        true
     }
 
     fn add_addr(&mut self, level: usize, addr: Address) -> Result<(), std::io::Error> {
@@ -145,7 +145,7 @@ impl<'a> TreeWriter<'a> {
 
 use std::collections::HashMap;
 
-impl Sink for HashMap<Address, Vec<u8>> {
+impl<S: ::std::hash::BuildHasher> Sink for HashMap<Address, Vec<u8>, S> {
     fn send_chunk(&mut self, addr: Address, data: Vec<u8>) -> Result<(), std::io::Error> {
         self.insert(addr, data);
         Ok(())
