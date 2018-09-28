@@ -20,6 +20,7 @@ pub trait Store {
 
 pub struct TreeWriter<'a> {
     max_addr_chunk_size: usize,
+    split_mask: [u8; 32],
     sink: &'a mut Sink,
     tree_blocks: Vec<Vec<u8>>,
 }
@@ -29,9 +30,14 @@ fn u16_be_bytes(v: u16) -> (u8, u8) {
 }
 
 impl<'a> TreeWriter<'a> {
-    pub fn new(sink: &'a mut Sink, max_addr_chunk_size: usize) -> TreeWriter<'a> {
+    pub fn new(
+        sink: &'a mut Sink,
+        max_addr_chunk_size: usize,
+        split_mask: [u8; ADDRESS_SZ],
+    ) -> TreeWriter<'a> {
         assert!(max_addr_chunk_size >= MINIMUM_ADDR_CHUNK_SIZE);
         TreeWriter {
+            split_mask,
             max_addr_chunk_size,
             sink,
             tree_blocks: Vec::new(),
@@ -56,6 +62,19 @@ impl<'a> TreeWriter<'a> {
         block
     }
 
+    fn is_split_point(&self, addr: &Address) -> bool {
+        assert!(ADDRESS_SZ == self.split_mask.len());
+
+        for i in 0..ADDRESS_SZ {
+            let ri = ADDRESS_SZ - 1 - i;
+            if (addr[ri] & self.split_mask[ri]) != 0 {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     fn add_addr(&mut self, level: usize, addr: Address) -> Result<(), std::io::Error> {
         if self.tree_blocks.len() < level + 1 {
             self.tree_blocks.push(Vec::new());
@@ -65,13 +84,17 @@ impl<'a> TreeWriter<'a> {
         assert!(self.tree_blocks[level].len() >= HDR_SZ);
         self.tree_blocks[level].extend(&addr);
 
-        // If the next add would address us over the max size, we must split here.
-        if self.tree_blocks[level].len() + ADDRESS_SZ > self.max_addr_chunk_size {
-            let current_level_block = self.take_and_clear_level(level);
-            let current_block_address: Address = sha2_256::sha2_256(&current_level_block);
-            self.sink
-                .send_chunk(current_block_address, current_level_block)?;
-            self.add_addr(level + 1, current_block_address)?;
+        if self.tree_blocks[level].len() >= MINIMUM_ADDR_CHUNK_SIZE {
+            let next_would_overflow_max_size =
+                self.tree_blocks[level].len() + ADDRESS_SZ > self.max_addr_chunk_size;
+
+            if self.is_split_point(&addr) || next_would_overflow_max_size {
+                let current_level_block = self.take_and_clear_level(level);
+                let current_block_address: Address = sha2_256::sha2_256(&current_level_block);
+                self.sink
+                    .send_chunk(current_block_address, current_level_block)?;
+                self.add_addr(level + 1, current_block_address)?;
+            }
         }
 
         Ok(())
@@ -132,7 +155,9 @@ impl Sink for HashMap<Address, Vec<u8>> {
 #[test]
 fn test_write_single_level() {
     let mut chunks = HashMap::<Address, Vec<u8>>::new();
-    let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE);
+    // Chunks that can only fit two addresses.
+    // Split mask always is never successful.
+    let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
 
     tw.add([0; ADDRESS_SZ], vec![]).unwrap();
     tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
@@ -143,7 +168,6 @@ fn test_write_single_level() {
     // root = [hdr .. chunk1 .. chunk2 ]
     // chunk1, chunk2
     assert_eq!(chunks.len(), 3);
-
     assert_eq!(chunks.get_mut(&[0; ADDRESS_SZ]).unwrap(), &vec![]);
     assert_eq!(chunks.get_mut(&[1; ADDRESS_SZ]).unwrap(), &vec![0]);
 
@@ -156,7 +180,55 @@ fn test_write_single_level() {
 fn test_write_two_levels() {
     let mut chunks = HashMap::<Address, Vec<u8>>::new();
     // Chunks that can only fit two addresses.
-    let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE);
+    // Split mask always is never successful.
+    let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
+
+    tw.add([0; ADDRESS_SZ], vec![]).unwrap();
+    tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
+    tw.add([2; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+
+    let result = tw.finish().unwrap();
+
+    // root = [hdr .. address1 .. address2 ]
+    // address1 = [hdr .. chunk0 .. chunk1 ]
+    // address2 = [hdr .. chunk3 ]
+    // chunk0, chunk1, chunk3
+    assert_eq!(chunks.len(), 6);
+
+    let addr_chunk = chunks.get_mut(&result).unwrap();
+    assert_eq!(addr_chunk.len(), 2 * ADDRESS_SZ + HDR_SZ);
+}
+
+#[test]
+fn test_write_single_level_content_split() {
+    let mut chunks = HashMap::<Address, Vec<u8>>::new();
+    // Allow large chunks.
+    // Split mask always is successful.
+    let mut tw = TreeWriter::new(&mut chunks, SENSIBLE_ADDR_MAX_CHUNK_SIZE, [0; 32]);
+
+    tw.add([0; ADDRESS_SZ], vec![]).unwrap();
+    tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
+
+    let result = tw.finish().unwrap();
+
+    // One chunk per added. One for addresses.
+    // root = [hdr .. chunk1 .. chunk2 ]
+    // chunk1, chunk2
+    assert_eq!(chunks.len(), 3);
+    assert_eq!(chunks.get_mut(&[0; ADDRESS_SZ]).unwrap(), &vec![]);
+    assert_eq!(chunks.get_mut(&[1; ADDRESS_SZ]).unwrap(), &vec![0]);
+
+    let addr_chunk = chunks.get_mut(&result).unwrap();
+
+    assert_eq!(addr_chunk.len(), 2 * ADDRESS_SZ + HDR_SZ);
+}
+
+#[test]
+fn test_write_two_levels_content_split() {
+    let mut chunks = HashMap::<Address, Vec<u8>>::new();
+    // Allow large chunks.
+    // Split mask that is always successful.
+    let mut tw = TreeWriter::new(&mut chunks, SENSIBLE_ADDR_MAX_CHUNK_SIZE, [0; 32]);
 
     tw.add([0; ADDRESS_SZ], vec![]).unwrap();
     tw.add([1; ADDRESS_SZ], vec![0]).unwrap();
