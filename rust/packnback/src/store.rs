@@ -1,3 +1,4 @@
+use super::address::*;
 use std::error;
 use std::fmt;
 use std::fs;
@@ -5,9 +6,11 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
 extern crate asymcrypt;
+extern crate fs2;
 extern crate rand;
 extern crate tempdir;
 
+use fs2::FileExt;
 use rand::Rng;
 
 #[derive(Debug)]
@@ -48,13 +51,20 @@ impl From<std::io::Error> for StoreError {
 
 pub struct PacknbackStore {
     store_path: PathBuf,
+    chunk_dir_path: PathBuf,
+}
+
+pub struct AddDataTransaction<'a> {
+    gc_lock: fs::File,
+    store: &'a PacknbackStore,
+    chunk_path: PathBuf,
 }
 
 impl PacknbackStore {
     // Does NOT sync the directory. A sync of the directory still needs to be
     // done to ensure the atomic rename is persisted.
     // That sync can be done once at the end of an 'upload transaction'.
-    fn atomic_add_file_no_parent_sync(p: &Path, contents: &mut [u8]) -> Result<(), StoreError> {
+    fn atomic_add_file_no_parent_sync(p: &Path, contents: &[u8]) -> Result<(), StoreError> {
         let temp_path = p
             .to_string_lossy()
             .chars()
@@ -72,17 +82,21 @@ impl PacknbackStore {
         Ok(())
     }
 
-    fn atomic_add_file_with_parent_sync(p: &Path, contents: &mut [u8]) -> Result<(), StoreError> {
-        PacknbackStore::atomic_add_file_no_parent_sync(p, contents)?;
-        let dir = fs::File::open(&p.parent().unwrap())?;
+    fn sync_dir(p: &Path) -> Result<(), StoreError> {
+        let dir = fs::File::open(p)?;
         dir.sync_all()?;
+        Ok(())
+    }
+
+    fn atomic_add_file_with_parent_sync(p: &Path, contents: &[u8]) -> Result<(), StoreError> {
+        PacknbackStore::atomic_add_file_no_parent_sync(p, contents)?;
+        PacknbackStore::sync_dir(p.parent().unwrap())?;
         Ok(())
     }
 
     fn atomic_add_dir_with_parent_sync(p: &Path) -> Result<(), StoreError> {
         fs::DirBuilder::new().create(p)?;
-        let dir = fs::File::open(&p.parent().unwrap())?;
-        dir.sync_all()?;
+        PacknbackStore::sync_dir(p.parent().unwrap())?;
         Ok(())
     }
 
@@ -130,10 +144,26 @@ impl PacknbackStore {
         Ok(())
     }
 
+    fn count_chunks(&self) -> Result<usize, StoreError> {
+        let paths = fs::read_dir(self.chunk_dir_path.as_path())?;
+        Ok(paths
+            .filter(|e| {
+                if let Ok(d) = e {
+
+                } else {
+                    false
+                }
+            }).count())
+    }
+
     pub fn new(store_path: PathBuf) -> Result<PacknbackStore, StoreError> {
         PacknbackStore::check_repo_paths(&store_path.as_path())?;
-
-        Ok(PacknbackStore { store_path })
+        let mut chunk_dir_path = store_path.clone();
+        chunk_dir_path.push("chunks");
+        Ok(PacknbackStore {
+            store_path,
+            chunk_dir_path,
+        })
     }
 
     pub fn init(
@@ -172,6 +202,39 @@ impl PacknbackStore {
 
         PacknbackStore::new(path_buf)
     }
+
+    pub fn add_data_transaction<'a>(&'a self) -> Result<AddDataTransaction<'a>, StoreError> {
+        let mut gc_lock_path = self.store_path.clone();
+        gc_lock_path.push("locks");
+        gc_lock_path.push("gc.lock");
+        let gc_lock = fs::File::open(gc_lock_path)?;
+        gc_lock.lock_shared()?;
+
+        Ok(AddDataTransaction {
+            gc_lock,
+            store: &self,
+            chunk_path: self.chunk_dir_path.clone(),
+        })
+    }
+}
+
+impl<'a> AddDataTransaction<'a> {
+    pub fn add_chunk(&mut self, addr: Address, buf: Vec<u8>) -> Result<(), StoreError> {
+        // Ugliness here is just to reuse the buffer for every chunk.
+        // it may be overkill, in which case we should just do a clone each time.
+        self.chunk_path.push(addr.as_hex_addr().as_str());
+        let r = PacknbackStore::atomic_add_file_no_parent_sync(self.chunk_path.as_path(), &buf);
+        self.chunk_path.pop();
+        // Check error after restoring with pop
+        r?;
+        Ok(())
+    }
+
+    pub fn sync(self) -> Result<(), StoreError> {
+        PacknbackStore::sync_dir(self.store.chunk_dir_path.as_path())?;
+        self.gc_lock.unlock()?;
+        Ok(())
+    }
 }
 
 #[test]
@@ -182,4 +245,17 @@ fn init_store_dir() {
     let mut path_buf = PathBuf::from(tmp_dir.path());
     path_buf.push("store");
     PacknbackStore::init(path_buf.as_path(), &k.pub_key()).unwrap();
+}
+
+#[test]
+fn add_chunk() {
+    let tmp_dir = tempdir::TempDir::new("packnback_test_repo").unwrap();
+    let k = asymcrypt::Key::new();
+
+    let mut path_buf = PathBuf::from(tmp_dir.path());
+    path_buf.push("store");
+    let store = PacknbackStore::init(path_buf.as_path(), &k.pub_key()).unwrap();
+    let mut tx = store.add_data_transaction().unwrap();
+    tx.add_chunk(Address::default(), vec![]).unwrap();
+    tx.sync().unwrap();
 }

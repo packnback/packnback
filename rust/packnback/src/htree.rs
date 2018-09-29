@@ -1,15 +1,13 @@
+use super::address::*;
 use haclstar::sha2_256;
 use std::fmt;
 
 const HDR_SZ: usize = 4;
-const ADDRESS_SZ: usize = 32;
 const TYPE_TREE: u16 = 0;
 
 // The minimum chunk size is enough for 2 addresses and a header.
 pub const MINIMUM_ADDR_CHUNK_SIZE: usize = HDR_SZ + 2 * ADDRESS_SZ;
 pub const SENSIBLE_ADDR_MAX_CHUNK_SIZE: usize = HDR_SZ + 30000 * ADDRESS_SZ;
-
-type Address = [u8; 32];
 
 pub trait Sink {
     fn send_chunk(&mut self, addr: Address, data: Vec<u8>) -> Result<(), std::io::Error>;
@@ -72,7 +70,7 @@ impl<'a> TreeWriter<'a> {
 
         for i in 0..ADDRESS_SZ {
             let ri = ADDRESS_SZ - 1 - i;
-            if (addr[ri] & self.split_mask[ri]) != 0 {
+            if (addr.bytes[ri] & self.split_mask[ri]) != 0 {
                 return false;
             }
         }
@@ -87,7 +85,7 @@ impl<'a> TreeWriter<'a> {
         }
 
         assert!(self.tree_blocks[level].len() >= HDR_SZ);
-        self.tree_blocks[level].extend(&addr);
+        self.tree_blocks[level].extend(&addr.bytes);
 
         if self.tree_blocks[level].len() >= MINIMUM_ADDR_CHUNK_SIZE {
             let next_would_overflow_max_size =
@@ -95,7 +93,8 @@ impl<'a> TreeWriter<'a> {
 
             if self.is_split_point(&addr) || next_would_overflow_max_size {
                 let current_level_block = self.take_and_clear_level(level);
-                let current_block_address: Address = sha2_256::sha2_256(&current_level_block);
+                let current_block_address =
+                    Address::from_bytes(&sha2_256::sha2_256(&current_level_block));
                 self.sink
                     .send_chunk(current_block_address, current_level_block)?;
                 self.add_addr(level + 1, current_block_address)?;
@@ -117,8 +116,10 @@ impl<'a> TreeWriter<'a> {
         {
             // We are the top level, and we only ever got a single address written to us.
             // This block is actually the root address.
-            let mut result_addr: Address = [0; 32];
-            result_addr.clone_from_slice(&self.tree_blocks[level][HDR_SZ..]);
+            let mut result_addr = Address::default();
+            result_addr
+                .bytes
+                .clone_from_slice(&self.tree_blocks[level][HDR_SZ..]);
             return Ok(result_addr);
         }
 
@@ -133,7 +134,7 @@ impl<'a> TreeWriter<'a> {
 
         // Add the current block to the parent.
         let block = self.take_and_clear_level(level);
-        let current_block_address: Address = sha2_256::sha2_256(&block);
+        let current_block_address = Address::from_bytes(&sha2_256::sha2_256(&block));
         self.sink.send_chunk(current_block_address, block)?;
         self.add_addr(level + 1, current_block_address)?;
         Ok(self.finish_level(level + 1)?)
@@ -201,7 +202,7 @@ impl<'a> TreeReader<'a> {
     pub fn new(source: &'a mut Source) -> TreeReader<'a> {
         TreeReader {
             source,
-            last_block_parent: [0; ADDRESS_SZ],
+            last_block_parent: Address::default(),
             tree_block_address: Vec::new(),
             tree_blocks: Vec::new(),
             tree_heights: Vec::new(),
@@ -264,9 +265,9 @@ impl<'a> TreeReader<'a> {
                 return Err(HTreeError::CorruptOrTamperedDataError);
             }
 
-            let mut result: Address = [0; ADDRESS_SZ];
-            result.clone_from_slice(&remaining[0..ADDRESS_SZ]);
-            *read_offset += result.len();
+            let mut result = Address::default();
+            result.bytes.clone_from_slice(&remaining[0..ADDRESS_SZ]);
+            *read_offset += ADDRESS_SZ;
             self.last_block_parent = *parent_addr;
             return Ok(Some((result, *height == 0)));
         }
@@ -311,22 +312,9 @@ pub fn debug_emit_graphvis(source: &mut Source, addr: Address) -> () {
     while let Some((a, is_leaf)) = tr.next_addr().unwrap() {
         let parent = tr.last_block_parent;
 
-        print!("\"");
-        debug_hex_print(&parent);
-        print!("\"");
-        print!("->");
-        print!("\"");
-        debug_hex_print(&a);
-        println!("\"");
-        debug_hex_print(&a);
+        println!("\"{}\" -> \"{}\"", &parent, &a);
         if is_leaf {
-            print!("\"");
-            debug_hex_print(&a);
-            print!("\"");
-            print!("->");
-            print!("\"");
-            print!("{:?}", tr.get_chunk(&a).unwrap());
-            println!("\"");
+            println!("\"{}\" -> \"{:?}\"", &a, tr.get_chunk(&a).unwrap());
         } else {
             tr.push_addr(a).unwrap();
         }
@@ -363,7 +351,8 @@ fn test_write_no_level() {
     // Split mask that is never successful.
     let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
 
-    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
+    tw.add(Address::from_bytes(&[1; ADDRESS_SZ]), vec![])
+        .unwrap();
     let result = tw.finish().unwrap();
 
     // root = chunk1
@@ -379,8 +368,10 @@ fn test_write_shape_single_level() {
     // Split mask is never successful.
     let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
 
-    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
-    tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
+    tw.add(Address::from_bytes(&[1; ADDRESS_SZ]), vec![])
+        .unwrap();
+    tw.add(Address::from_bytes(&[2; ADDRESS_SZ]), vec![0])
+        .unwrap();
 
     let result = tw.finish().unwrap();
 
@@ -399,9 +390,12 @@ fn test_write_shape_two_levels() {
     // Split mask always is never successful.
     let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
 
-    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
-    tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
-    tw.add([3; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+    tw.add(Address::from_bytes(&[1; ADDRESS_SZ]), vec![])
+        .unwrap();
+    tw.add(Address::from_bytes(&[2; ADDRESS_SZ]), vec![0])
+        .unwrap();
+    tw.add(Address::from_bytes(&[3; ADDRESS_SZ]), vec![1, 2, 3])
+        .unwrap();
 
     let result = tw.finish().unwrap();
 
@@ -421,8 +415,10 @@ fn test_write_shape_single_level_content_split() {
     // Split mask always is successful.
     let mut tw = TreeWriter::new(&mut chunks, SENSIBLE_ADDR_MAX_CHUNK_SIZE, [0; 32]);
 
-    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
-    tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
+    tw.add(Address::from_bytes(&[1; ADDRESS_SZ]), vec![])
+        .unwrap();
+    tw.add(Address::from_bytes(&[2; ADDRESS_SZ]), vec![0])
+        .unwrap();
 
     let result = tw.finish().unwrap();
 
@@ -441,9 +437,12 @@ fn test_write_shape_two_levels_content_split() {
     // Split mask that is always successful.
     let mut tw = TreeWriter::new(&mut chunks, SENSIBLE_ADDR_MAX_CHUNK_SIZE, [0; 32]);
 
-    tw.add([1; ADDRESS_SZ], vec![]).unwrap();
-    tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
-    tw.add([3; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+    tw.add(Address::from_bytes(&[1; ADDRESS_SZ]), vec![])
+        .unwrap();
+    tw.add(Address::from_bytes(&[2; ADDRESS_SZ]), vec![0])
+        .unwrap();
+    tw.add(Address::from_bytes(&[3; ADDRESS_SZ]), vec![1, 2, 3])
+        .unwrap();
 
     let result = tw.finish().unwrap();
 
@@ -465,9 +464,12 @@ fn test_tree_reader_walk() {
         // Chunks that can only fit two addresses.
         // Split mask always is never successful.
         let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
-        tw.add([1; ADDRESS_SZ], vec![]).unwrap();
-        tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
-        tw.add([3; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+        tw.add(Address::from_bytes(&[1; ADDRESS_SZ]), vec![])
+            .unwrap();
+        tw.add(Address::from_bytes(&[2; ADDRESS_SZ]), vec![0])
+            .unwrap();
+        tw.add(Address::from_bytes(&[3; ADDRESS_SZ]), vec![1, 2, 3])
+            .unwrap();
 
         addr = tw.finish().unwrap();
     }
@@ -512,9 +514,12 @@ fn test_tree_reader_chunks() {
         // Chunks that can only fit two addresses.
         // Split mask always is never successful.
         let mut tw = TreeWriter::new(&mut chunks, MINIMUM_ADDR_CHUNK_SIZE, [0xff; 32]);
-        tw.add([1; ADDRESS_SZ], vec![]).unwrap();
-        tw.add([2; ADDRESS_SZ], vec![0]).unwrap();
-        tw.add([3; ADDRESS_SZ], vec![1, 2, 3]).unwrap();
+        tw.add(Address::from_bytes(&[1; ADDRESS_SZ]), vec![])
+            .unwrap();
+        tw.add(Address::from_bytes(&[2; ADDRESS_SZ]), vec![0])
+            .unwrap();
+        tw.add(Address::from_bytes(&[3; ADDRESS_SZ]), vec![1, 2, 3])
+            .unwrap();
 
         addr = tw.finish().unwrap();
     }
@@ -523,13 +528,13 @@ fn test_tree_reader_chunks() {
     tr.push_addr(addr).unwrap();
 
     let (addr, buf) = tr.next_chunk().unwrap().unwrap();
-    assert_eq!([1; ADDRESS_SZ], addr);
+    assert_eq!(Address::from_bytes(&[1; ADDRESS_SZ]), addr);
     assert_eq!(buf, vec![]);
     let (addr, buf) = tr.next_chunk().unwrap().unwrap();
-    assert_eq!([2; ADDRESS_SZ], addr);
+    assert_eq!(Address::from_bytes(&[2; ADDRESS_SZ]), addr);
     assert_eq!(buf, vec![0]);
     let (addr, buf) = tr.next_chunk().unwrap().unwrap();
-    assert_eq!([3; ADDRESS_SZ], addr);
+    assert_eq!(Address::from_bytes(&[3; ADDRESS_SZ]), addr);
     assert_eq!(buf, vec![1, 2, 3]);
 
     if let Some(_) = tr.next_chunk().unwrap() {

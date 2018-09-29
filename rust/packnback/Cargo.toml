@@ -9,6 +9,7 @@ edition = "2018"
 clap = "*"
 tempdir = "*"
 rand = "*"
+fs2 = "*"
 
 [dependencies.haclstar]
 path = "../haclstar"
