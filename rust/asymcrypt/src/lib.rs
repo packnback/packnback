@@ -1,8 +1,11 @@
-extern crate haclstar;
-use haclstar::nacl::*;
-use rand::{OsRng, RngCore};
 use std::error;
 use std::fmt;
+use std::io::Cursor;
+
+extern crate haclstar;
+
+use haclstar::nacl::*;
+use rand::{OsRng, RngCore};
 
 const KEY_ID_SIZE: usize = 32;
 const RANDOM_KEY_SIZE: usize = 32;
@@ -99,6 +102,17 @@ impl Key {
         r.read_exact(&mut k.sign_sk.bytes)?;
         Ok(k)
     }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut c = Cursor::new(Vec::<u8>::new());
+        self.write(&mut c).unwrap();
+        c.into_inner()
+    }
+
+    pub fn from_vec(v: &Vec<u8>) -> Result<Key, AsymcryptError> {
+        let mut c = Cursor::new(v);
+        Key::read_from(&mut c)
+    }
 }
 
 impl PublicKey {
@@ -117,6 +131,17 @@ impl PublicKey {
         r.read_exact(&mut k.box_pk.bytes)?;
         r.read_exact(&mut k.sign_pk.bytes)?;
         Ok(k)
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut c = Cursor::new(Vec::<u8>::new());
+        self.write(&mut c).unwrap();
+        c.into_inner()
+    }
+
+    pub fn from_vec(v: &Vec<u8>) -> Result<PublicKey, AsymcryptError> {
+        let mut c = Cursor::new(v);
+        PublicKey::read_from(&mut c)
     }
 }
 
@@ -363,8 +388,6 @@ pub fn decrypt(
 
 #[test]
 fn test_encrypt_decrypt() {
-    use std::io::Cursor;
-
     // Large enough to loop multiple times
     const SZ: usize = 100000;
 
@@ -390,8 +413,6 @@ fn test_encrypt_decrypt() {
 
 #[test]
 fn test_encrypt_decrypt_tampered() {
-    use std::io::Cursor;
-
     const SZ: usize = 200;
 
     let key = Key::new();
@@ -419,8 +440,6 @@ fn test_encrypt_decrypt_tampered() {
 
 #[test]
 fn test_encrypt_decrypt_wrong_key() {
-    use std::io::Cursor;
-
     const SZ: usize = 200;
 
     let key = Key::new();
@@ -443,4 +462,22 @@ fn test_encrypt_decrypt_wrong_key() {
             panic!(v)
         }
     }
+}
+
+#[test]
+fn test_key_marshal_unmarshal() {
+    let k1 = Key::new();
+    let pk1 = k1.pub_key();
+
+    let k1vec = k1.to_vec();
+    let pk1vec = pk1.to_vec();
+
+    let k2 = Key::from_vec(&k1vec).unwrap();
+    let pk2 = PublicKey::from_vec(&pk1vec).unwrap();
+
+    let k2vec = k2.to_vec();
+    let pk2vec = pk2.to_vec();
+
+    assert_eq!(k1vec, k2vec);
+    assert_eq!(pk1vec, pk2vec);
 }

@@ -1,4 +1,5 @@
 use super::address::*;
+use super::htree;
 use std::error;
 use std::fmt;
 use std::fs;
@@ -59,46 +60,46 @@ pub struct AddDataTransaction<'a> {
     store: &'a PacknbackStore,
 }
 
+// Does NOT sync the directory. A sync of the directory still needs to be
+// done to ensure the atomic rename is persisted.
+// That sync can be done once at the end of an 'upload transaction'.
+fn atomic_add_file_no_parent_sync(p: &Path, contents: &[u8]) -> Result<(), std::io::Error> {
+    let temp_path = p
+        .to_string_lossy()
+        .chars()
+        .chain(
+            std::iter::repeat(())
+                .map(|()| rand::thread_rng().sample(rand::distributions::Alphanumeric))
+                .take(10),
+        ).chain(".tmp".chars())
+        .collect::<String>();
+
+    let mut tmp_file = fs::File::create(&temp_path)?;
+    tmp_file.write_all(contents)?;
+    tmp_file.sync_all()?;
+    std::fs::rename(temp_path, p)?;
+    Ok(())
+}
+
+fn sync_dir(p: &Path) -> Result<(), std::io::Error> {
+    let dir = fs::File::open(p)?;
+    dir.sync_all()?;
+    Ok(())
+}
+
+fn atomic_add_file_with_parent_sync(p: &Path, contents: &[u8]) -> Result<(), std::io::Error> {
+    atomic_add_file_no_parent_sync(p, contents)?;
+    sync_dir(p.parent().unwrap())?;
+    Ok(())
+}
+
+fn atomic_add_dir_with_parent_sync(p: &Path) -> Result<(), std::io::Error> {
+    fs::DirBuilder::new().create(p)?;
+    sync_dir(p.parent().unwrap())?;
+    Ok(())
+}
+
 impl PacknbackStore {
-    // Does NOT sync the directory. A sync of the directory still needs to be
-    // done to ensure the atomic rename is persisted.
-    // That sync can be done once at the end of an 'upload transaction'.
-    fn atomic_add_file_no_parent_sync(p: &Path, contents: &[u8]) -> Result<(), StoreError> {
-        let temp_path = p
-            .to_string_lossy()
-            .chars()
-            .chain(
-                std::iter::repeat(())
-                    .map(|()| rand::thread_rng().sample(rand::distributions::Alphanumeric))
-                    .take(10),
-            ).chain(".tmp".chars())
-            .collect::<String>();
-
-        let mut tmp_file = fs::File::create(&temp_path)?;
-        tmp_file.write_all(contents)?;
-        tmp_file.sync_all()?;
-        std::fs::rename(temp_path, p)?;
-        Ok(())
-    }
-
-    fn sync_dir(p: &Path) -> Result<(), StoreError> {
-        let dir = fs::File::open(p)?;
-        dir.sync_all()?;
-        Ok(())
-    }
-
-    fn atomic_add_file_with_parent_sync(p: &Path, contents: &[u8]) -> Result<(), StoreError> {
-        PacknbackStore::atomic_add_file_no_parent_sync(p, contents)?;
-        PacknbackStore::sync_dir(p.parent().unwrap())?;
-        Ok(())
-    }
-
-    fn atomic_add_dir_with_parent_sync(p: &Path) -> Result<(), StoreError> {
-        fs::DirBuilder::new().create(p)?;
-        PacknbackStore::sync_dir(p.parent().unwrap())?;
-        Ok(())
-    }
-
     fn check_exists(p: &Path) -> Result<(), StoreError> {
         if p.exists() {
             Ok(())
@@ -143,7 +144,7 @@ impl PacknbackStore {
         Ok(())
     }
 
-    fn count_chunks(&self) -> Result<usize, StoreError> {
+    pub fn count_chunks(&self) -> Result<usize, StoreError> {
         let paths = fs::read_dir(self.chunk_dir_path.as_path())?;
         Ok(paths
             .filter(|e| {
@@ -175,31 +176,31 @@ impl PacknbackStore {
     ) -> Result<PacknbackStore, StoreError> {
         let mut path_buf = PathBuf::from(store_path);
 
-        PacknbackStore::atomic_add_dir_with_parent_sync(&path_buf.as_path())?;
+        atomic_add_dir_with_parent_sync(path_buf.as_path())?;
 
         path_buf.push("chunks");
-        PacknbackStore::atomic_add_dir_with_parent_sync(&path_buf.as_path())?;
+        atomic_add_dir_with_parent_sync(path_buf.as_path())?;
         path_buf.pop();
 
         path_buf.push("roots");
-        PacknbackStore::atomic_add_dir_with_parent_sync(&path_buf.as_path())?;
+        atomic_add_dir_with_parent_sync(path_buf.as_path())?;
         path_buf.pop();
 
         path_buf.push("authorized_keys");
-        PacknbackStore::atomic_add_dir_with_parent_sync(&path_buf.as_path())?;
+        atomic_add_dir_with_parent_sync(path_buf.as_path())?;
         path_buf.pop();
 
         path_buf.push("master.pubkey");
-        PacknbackStore::atomic_add_file_with_parent_sync(&path_buf.as_path(), &mut [])?;
+        atomic_add_file_with_parent_sync(path_buf.as_path(), &master_key.to_vec())?;
         path_buf.pop();
 
         path_buf.push("locks");
-        PacknbackStore::atomic_add_dir_with_parent_sync(path_buf.as_path())?;
+        atomic_add_dir_with_parent_sync(path_buf.as_path())?;
         path_buf.push("gc.lock");
-        PacknbackStore::atomic_add_file_with_parent_sync(&path_buf.as_path(), &mut [])?;
+        atomic_add_file_with_parent_sync(path_buf.as_path(), &mut [])?;
         path_buf.pop();
         path_buf.push("refs.lock");
-        PacknbackStore::atomic_add_file_with_parent_sync(&path_buf.as_path(), &mut [])?;
+        atomic_add_file_with_parent_sync(path_buf.as_path(), &mut [])?;
         path_buf.pop();
         path_buf.pop();
 
@@ -221,31 +222,27 @@ impl PacknbackStore {
 }
 
 impl<'a> AddDataTransaction<'a> {
-    pub fn add_chunk(&mut self, addr: Address, buf: Vec<u8>) -> Result<(), StoreError> {
+    pub fn add_chunk(&mut self, addr: Address, buf: Vec<u8>) -> Result<(), std::io::Error> {
         let mut chunk_path = self.store.chunk_dir_path.clone();
         chunk_path.push(addr.as_hex_addr().as_str());
 
         if !chunk_path.exists() {
-            PacknbackStore::atomic_add_file_no_parent_sync(chunk_path.as_path(), &buf)?;
+            atomic_add_file_no_parent_sync(chunk_path.as_path(), &buf)?;
         }
         Ok(())
     }
 
     pub fn sync(self) -> Result<(), StoreError> {
-        PacknbackStore::sync_dir(self.store.chunk_dir_path.as_path())?;
+        sync_dir(self.store.chunk_dir_path.as_path())?;
         self.gc_lock.unlock()?;
         Ok(())
     }
 }
 
-#[test]
-fn init_store_dir() {
-    let tmp_dir = tempdir::TempDir::new("packnback_test_repo").unwrap();
-    let k = asymcrypt::Key::new();
-
-    let mut path_buf = PathBuf::from(tmp_dir.path());
-    path_buf.push("store");
-    PacknbackStore::init(path_buf.as_path(), &k.pub_key()).unwrap();
+impl<'a> htree::Sink for AddDataTransaction<'a> {
+    fn send_chunk(&mut self, addr: Address, data: Vec<u8>) -> Result<(), std::io::Error> {
+        self.add_chunk(addr, data)
+    }
 }
 
 #[test]
