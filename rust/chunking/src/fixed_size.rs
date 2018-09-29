@@ -1,5 +1,6 @@
 pub struct FixedSizeChunker {
-    sz: usize,
+    reserve_sz: usize,
+    data_sz: usize,
     cur_vec: Vec<u8>,
 }
 
@@ -17,26 +18,39 @@ fn read_exact_or_eof(r: &mut std::io::Read, buf: &mut [u8]) -> Result<usize, std
     }
 }
 
+fn new_backing_vec(reserve_sz: usize, data_sz: usize) -> Vec<u8> {
+    let mut v = Vec::<u8>::with_capacity(reserve_sz + data_sz);
+    v.extend(std::iter::repeat(0).take(reserve_sz));
+    v
+}
+
 impl FixedSizeChunker {
-    pub fn new(sz: usize) -> FixedSizeChunker {
-        assert!(sz != 0);
+    pub fn new(reserve_sz: usize, data_sz: usize) -> FixedSizeChunker {
+        assert!(data_sz != 0);
 
         FixedSizeChunker {
-            sz,
-            cur_vec: Vec::<u8>::with_capacity(sz),
+            reserve_sz,
+            data_sz,
+            cur_vec: new_backing_vec(reserve_sz, data_sz),
         }
     }
 
+    fn spare_capacity(&self) -> usize {
+        self.cur_vec.capacity() - self.cur_vec.len()
+    }
+
+    fn swap_vec(&mut self) -> Vec<u8> {
+        let mut v = new_backing_vec(self.reserve_sz, self.data_sz);
+        std::mem::swap(&mut v, &mut self.cur_vec);
+        v
+    }
+
     pub fn add_bytes(&mut self, buf: &[u8]) -> (usize, Option<Vec<u8>>) {
-        let spare_capacity = self.cur_vec.capacity() - self.cur_vec.len();
-        let n_to_read = std::cmp::min(spare_capacity, buf.len());
+        let n_to_read = std::cmp::min(self.spare_capacity(), buf.len());
         self.cur_vec.extend(buf.iter().take(n_to_read));
 
-        if self.cur_vec.len() == self.sz {
-            let mut v = Vec::<u8>::with_capacity(self.sz);
-            std::mem::swap(&mut v, &mut self.cur_vec);
-            assert!(v.len() == self.sz);
-            (n_to_read, Some(v))
+        if self.spare_capacity() == 0 {
+            (n_to_read, Some(self.swap_vec()))
         } else {
             (n_to_read, None)
         }
@@ -53,11 +67,8 @@ impl FixedSizeChunker {
         let n_read = read_exact_or_eof(r, &mut self.cur_vec[start_len..])?;
         self.cur_vec.truncate(start_len + n_read);
 
-        if self.cur_vec.len() == self.sz {
-            let mut v = Vec::<u8>::with_capacity(self.sz);
-            std::mem::swap(&mut v, &mut self.cur_vec);
-            assert!(v.len() == self.sz);
-            Ok(Some(v))
+        if self.spare_capacity() == 0 {
+            Ok(Some(self.swap_vec()))
         } else {
             Ok(None)
         }
@@ -67,7 +78,6 @@ impl FixedSizeChunker {
         if self.cur_vec.is_empty() {
             None
         } else {
-            assert!(self.cur_vec.len() < self.sz);
             Some(self.cur_vec)
         }
     }
@@ -75,7 +85,7 @@ impl FixedSizeChunker {
 
 #[test]
 fn test_add_bytes() {
-    let mut ch = FixedSizeChunker::new(2);
+    let mut ch = FixedSizeChunker::new(1, 2);
 
     match ch.add_bytes(b"a") {
         (1, None) => (),
@@ -83,7 +93,7 @@ fn test_add_bytes() {
     }
 
     match ch.add_bytes(b"bc") {
-        (1, Some(v)) => assert_eq!(v, b"ab"),
+        (1, Some(v)) => assert_eq!(v, b"\0ab"),
         v => panic!("{:?}", v),
     }
 
@@ -93,7 +103,7 @@ fn test_add_bytes() {
     }
 
     match ch.finish() {
-        Some(v) => assert_eq!(v, b"c"),
+        Some(v) => assert_eq!(v, b"\0c"),
         v => panic!("{:?}", v),
     }
 }
@@ -102,11 +112,11 @@ fn test_add_bytes() {
 fn test_read_chunk() {
     use std::io::Cursor;
 
-    let mut ch = FixedSizeChunker::new(2);
+    let mut ch = FixedSizeChunker::new(1, 2);
     let mut cur = Cursor::new(b"abc");
 
     match ch.read_chunk(&mut cur).unwrap() {
-        Some(v) => assert_eq!(v, b"ab"),
+        Some(v) => assert_eq!(v, b"\0ab"),
         v => panic!("{:?}", v),
     }
 
@@ -116,7 +126,7 @@ fn test_read_chunk() {
     }
 
     match ch.finish() {
-        Some(v) => assert_eq!(v, b"c"),
+        Some(v) => assert_eq!(v, b"\0c"),
         v => panic!("{:?}", v),
     }
 }
