@@ -298,7 +298,13 @@ impl<'a> ChunkHandle<'a> {
         Ok(())
     }
 
-    pub fn sync(self) -> Result<(), StoreError> {
+    pub fn get_chunk(&mut self, addr: Address) -> Result<Vec<u8>, std::io::Error> {
+        let mut chunk_path = self.store.chunk_dir_path.clone();
+        chunk_path.push(addr.as_hex_addr().as_str());
+        Ok(fs::read(chunk_path.as_path())?)
+    }
+
+    pub fn sync(&mut self) -> Result<(), StoreError> {
         sync_dir(self.store.chunk_dir_path.as_path())?;
         Ok(())
     }
@@ -310,19 +316,32 @@ impl<'a> htree::Sink for ChunkHandle<'a> {
     }
 }
 
+impl<'a> htree::Source for ChunkHandle<'a> {
+    fn get_chunk(&mut self, addr: Address) -> Result<Vec<u8>, htree::HTreeError> {
+        match self.get_chunk(addr) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(htree::HTreeError::from(e)),
+        }
+    }
+}
+
 #[test]
-fn add_chunk() {
+fn add_get_chunk() {
     let tmp_dir = tempdir::TempDir::new("packnback_test_repo").unwrap();
     let k = asymcrypt::Key::new();
 
     let mut path_buf = PathBuf::from(tmp_dir.path());
     path_buf.push("store");
     let store = PacknbackStore::init(path_buf.as_path(), &k.pub_key()).unwrap();
-    let mut tx = store.chunk_handle().unwrap();
-    tx.add_chunk(Address::default(), vec![]).unwrap();
-    tx.add_chunk(Address::default(), vec![]).unwrap();
-    tx.sync().unwrap();
+    let mut h = store.chunk_handle().unwrap();
+    let addr = Address::default();
+    h.add_chunk(addr, vec![1]).unwrap();
+    h.add_chunk(addr, vec![2]).unwrap();
+    h.sync().unwrap();
 
+    let v = h.get_chunk(addr).unwrap();
+
+    assert_eq!(v, vec![1]);
     assert_eq!(store.count_chunks().unwrap(), 1);
 }
 
