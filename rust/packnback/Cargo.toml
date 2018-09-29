@@ -7,6 +7,11 @@ edition = "2018"
 [dependencies]
 
 clap = "*"
+tempdir = "*"
+rand = "*"
 
 [dependencies.haclstar]
 path = "../haclstar"
+
+[dependencies.asymcrypt]
+path = "../asymcrypt"

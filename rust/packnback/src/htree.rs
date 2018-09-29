@@ -307,39 +307,31 @@ pub fn debug_emit_graphvis(source: &mut Source, addr: Address) -> () {
     let mut tr = TreeReader::new(source);
     tr.push_addr(addr).unwrap();
 
-    print!("digraph G {{\nnode [shape=record]\n");
-    loop {
-        match tr.next_addr().unwrap() {
-            Some((a, is_leaf)) => {
-                let parent = tr.last_block_parent;
+    println!("digraph G {{\nnode [shape=record]");
+    while let Some((a, is_leaf)) = tr.next_addr().unwrap() {
+        let parent = tr.last_block_parent;
 
-                print!("\"");
-                debug_hex_print(&parent);
-                print!("\"");
-                print!("->");
-                print!("\"");
-                debug_hex_print(&a);
-                print!("\"");
-                print!("\n");
-                debug_hex_print(&a);
-                if is_leaf {
-                    print!("\"");
-                    debug_hex_print(&a);
-                    print!("\"");
-                    print!("->");
-                    print!("\"");
-                    print!("{:?}", tr.get_chunk(&a).unwrap());
-                    print!("\"\n");
-                } else {
-                    tr.push_addr(a).unwrap();
-                }
-            }
-            None => {
-                break;
-            }
+        print!("\"");
+        debug_hex_print(&parent);
+        print!("\"");
+        print!("->");
+        print!("\"");
+        debug_hex_print(&a);
+        println!("\"");
+        debug_hex_print(&a);
+        if is_leaf {
+            print!("\"");
+            debug_hex_print(&a);
+            print!("\"");
+            print!("->");
+            print!("\"");
+            print!("{:?}", tr.get_chunk(&a).unwrap());
+            println!("\"");
+        } else {
+            tr.push_addr(a).unwrap();
         }
     }
-    print!("}}\n");
+    println!("}}");
 }
 
 use std::collections::HashMap;

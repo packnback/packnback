@@ -24,8 +24,8 @@ both strong cryptography and access controls.
 
 ## Paranoid testing
 
-We aim for total testing of all code paths in the data write/upload path. Nobody should lose backups
-due to a bug in our code.
+We aim for defailed automated testing of all code paths in the data write/upload path.
+Nobody should lose backups due to a bug in our code.
 
 # Roadmap
 
