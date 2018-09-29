@@ -57,7 +57,6 @@ pub struct PacknbackStore {
 pub struct AddDataTransaction<'a> {
     gc_lock: fs::File,
     store: &'a PacknbackStore,
-    chunk_path: PathBuf,
 }
 
 impl PacknbackStore {
@@ -149,7 +148,11 @@ impl PacknbackStore {
         Ok(paths
             .filter(|e| {
                 if let Ok(d) = e {
-
+                    if let Some(oss) = d.path().extension() {
+                        oss != "tmp"
+                    } else {
+                        true
+                    }
                 } else {
                     false
                 }
@@ -213,20 +216,18 @@ impl PacknbackStore {
         Ok(AddDataTransaction {
             gc_lock,
             store: &self,
-            chunk_path: self.chunk_dir_path.clone(),
         })
     }
 }
 
 impl<'a> AddDataTransaction<'a> {
     pub fn add_chunk(&mut self, addr: Address, buf: Vec<u8>) -> Result<(), StoreError> {
-        // Ugliness here is just to reuse the buffer for every chunk.
-        // it may be overkill, in which case we should just do a clone each time.
-        self.chunk_path.push(addr.as_hex_addr().as_str());
-        let r = PacknbackStore::atomic_add_file_no_parent_sync(self.chunk_path.as_path(), &buf);
-        self.chunk_path.pop();
-        // Check error after restoring with pop
-        r?;
+        let mut chunk_path = self.store.chunk_dir_path.clone();
+        chunk_path.push(addr.as_hex_addr().as_str());
+
+        if !chunk_path.exists() {
+            PacknbackStore::atomic_add_file_no_parent_sync(chunk_path.as_path(), &buf)?;
+        }
         Ok(())
     }
 
@@ -257,5 +258,8 @@ fn add_chunk() {
     let store = PacknbackStore::init(path_buf.as_path(), &k.pub_key()).unwrap();
     let mut tx = store.add_data_transaction().unwrap();
     tx.add_chunk(Address::default(), vec![]).unwrap();
+    tx.add_chunk(Address::default(), vec![]).unwrap();
     tx.sync().unwrap();
+
+    assert_eq!(store.count_chunks().unwrap(), 1);
 }
