@@ -16,6 +16,7 @@ use rand::Rng;
 
 #[derive(Debug)]
 pub enum StoreError {
+    AlreadyExists(PathBuf),
     NotInitializedProperly,
     StoreDoesNotExist,
     ErrorLoadingPublicKey(PathBuf, asymcrypt::AsymcryptError),
@@ -25,16 +26,21 @@ pub enum StoreError {
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            StoreError::AlreadyExists(ref p) => write!(
+                f,
+                "The path {} already exists, refusing to overwrite it.",
+                p.to_str().unwrap_or("unknown")
+            ),
             StoreError::NotInitializedProperly => {
                 write!(f, "The store was not initialized properly.")
             }
             StoreError::StoreDoesNotExist => {
                 write!(f, "The store does not exist, did you forget init?.")
             }
-            StoreError::ErrorLoadingPublicKey(ref path, ref err) => write!(
+            StoreError::ErrorLoadingPublicKey(ref p, ref err) => write!(
                 f,
                 "Unable to load key at '{}': {}\n",
-                path.to_str().unwrap_or("unknown"),
+                p.to_str().unwrap_or("unknown"),
                 err
             ),
             StoreError::IOError(ref e) => e.fmt(f),
@@ -216,6 +222,10 @@ impl PacknbackStore {
         master_key: &asymcrypt::PublicKey,
     ) -> Result<PacknbackStore, StoreError> {
         let mut path_buf = PathBuf::from(store_path);
+
+        if path_buf.exists() {
+            return Err(StoreError::AlreadyExists(path_buf));
+        }
 
         atomic_add_dir_with_parent_sync(path_buf.as_path())?;
 
