@@ -10,6 +10,7 @@ clap = "*"
 tempdir = "*"
 rand = "*"
 fs2 = "*"
+atty = "*"
 
 [dependencies.haclstar]
 path = "../haclstar"
