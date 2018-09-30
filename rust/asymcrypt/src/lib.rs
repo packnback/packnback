@@ -113,6 +113,11 @@ impl Key {
         let mut c = Cursor::new(v);
         Key::read_from(&mut c)
     }
+
+    pub fn from_path(p: & std::path::Path) -> Result<Key, AsymcryptError> {
+        let mut f = std::fs::File::open(p)?;
+        Key::read_from(&mut f)
+    }
 }
 
 impl PublicKey {
@@ -142,6 +147,11 @@ impl PublicKey {
     pub fn from_vec(v: &Vec<u8>) -> Result<PublicKey, AsymcryptError> {
         let mut c = Cursor::new(v);
         PublicKey::read_from(&mut c)
+    }
+
+    pub fn from_path(p: & std::path::Path) -> Result<PublicKey, AsymcryptError> {
+        let mut f = std::fs::File::open(p)?;
+        PublicKey::read_from(&mut f)
     }
 }
 
