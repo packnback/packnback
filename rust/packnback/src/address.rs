@@ -1,5 +1,7 @@
 use std::fmt;
 
+extern crate hex;
+
 pub const ADDRESS_SZ: usize = 32;
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
@@ -19,15 +21,8 @@ impl Address {
     }
 
     pub fn as_hex_addr(&self) -> HexAddress {
-        let tab = b"0123456789abcdef";
         let mut result = HexAddress::default();
-        for i in 0..self.bytes.len() {
-            let b = self.bytes[i];
-            let hi = (b & 0xf0) >> 4;
-            let lo = b & 0x0f;
-            result.bytes[2 * i] = tab[hi as usize];
-            result.bytes[2 * i + 1] = tab[lo as usize];
-        }
+        hex::encode(&self.bytes, &mut result.bytes);
         result
     }
 }

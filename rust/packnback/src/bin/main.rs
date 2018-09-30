@@ -42,6 +42,19 @@ Tips:
     );
 }
 
+// like ? operator but display the error then return 1;
+macro_rules! top_level_try {
+    (  $x:expr ) => {
+        match $x {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("{}", e);
+                return 1;
+            }
+        }
+    };
+}
+
 fn run_new_key(args: &clap::ArgMatches) -> i32 {
     let mut stdout = std::io::stdout();
     let mut _output_f: Option<std::fs::File> = None;
@@ -59,13 +72,7 @@ fn run_new_key(args: &clap::ArgMatches) -> i32 {
         &mut stdout
     } else {
         // XXX TODO IMPORTANT permission bits
-        match std::fs::File::create(output) {
-            Ok(f) => _output_f = Some(f),
-            Err(e) => {
-                eprintln!("{}", e);
-                return 1;
-            }
-        };
+        _output_f = Some(top_level_try!(std::fs::File::create(output)));
         if let Some(ref mut f) = _output_f {
             f
         } else {
@@ -74,41 +81,21 @@ fn run_new_key(args: &clap::ArgMatches) -> i32 {
     };
 
     let k = asymcrypt::Key::new();
-    match k.write(output_w) {
-        Ok(()) => (),
-        Err(e) => {
-            eprintln!("{}", e);
-            return 1;
-        }
-    }
-    match output_w.flush() {
-        Ok(()) => (),
-        Err(e) => {
-            eprintln!("{}", e);
-            return 1;
-        }
-    }
-
+    top_level_try!(k.write(output_w));
+    top_level_try!(output_w.flush());
     0
 }
 
 fn run_init(args: &clap::ArgMatches) -> i32 {
     let store_path = args.value_of("store").unwrap();
     let master_key_path = args.value_of("master-key").unwrap();
-    let k = match asymcrypt::Key::from_path(&std::path::Path::new(&master_key_path)) {
-        Ok(k) => k,
-        Err(e) => {
-            eprintln!("{}", e);
-            return 1;
-        }
-    };
-    match packnback::store::PacknbackStore::init(&std::path::Path::new(&store_path), &k.pub_key()) {
-        Ok(_) => (),
-        Err(e) => {
-            eprintln!("{}", e);
-            return 1;
-        }
-    };
+    let k = top_level_try!(asymcrypt::Key::from_path(&std::path::Path::new(
+        &master_key_path
+    )));
+    top_level_try!(packnback::store::PacknbackStore::init(
+        &std::path::Path::new(&store_path),
+        &k.pub_key()
+    ));
     0
 }
 

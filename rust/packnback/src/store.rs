@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 extern crate asymcrypt;
 extern crate fs2;
+extern crate hex;
 extern crate rand;
 extern crate tempdir;
 
@@ -293,6 +294,10 @@ impl PacknbackStore {
 
 impl<'a> ChangeStoreHandle<'a> {
     pub fn add_public_key(&mut self, pk: &asymcrypt::PublicKey) -> Result<(), StoreError> {
+        let mut key_path = self.store.store_path.clone();
+        key_path.push("authorized_keys");
+        key_path.push(hex::easy_encode_to_string(&pk.id));
+        atomic_add_file_with_parent_sync(key_path.as_path(), &pk.to_vec())?;
         Ok(())
     }
 }

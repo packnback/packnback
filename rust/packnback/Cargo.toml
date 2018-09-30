@@ -12,6 +12,9 @@ rand = "*"
 fs2 = "*"
 atty = "*"
 
+[dependencies.hex]
+path = "../hex"
+
 [dependencies.haclstar]
 path = "../haclstar"
 
