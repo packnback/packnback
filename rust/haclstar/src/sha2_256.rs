@@ -1,5 +1,6 @@
 extern crate chaclstar;
 use chaclstar::sha2_256;
+use std::io;
 
 // This sizes are only present in the bindings as a runtime value
 // Here we make it a compile time value and must use assert at runtime.
@@ -70,6 +71,16 @@ impl Sha2_256 {
         };
 
         hash
+    }
+}
+
+impl std::io::Write for Sha2_256 {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.update(buf);
+        Ok(buf.len())
+    }
+     fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
