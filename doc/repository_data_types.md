@@ -73,7 +73,7 @@ A directory is an encrypted directory listing, containing a list of directory en
 ```
 type: u8 = 2
 num_children: uint64,
-children: ChildInfo[NumAddresses],
+children: ChildInfo[num_children],
 encrypted_metadata: u8[...],
 ```
 
