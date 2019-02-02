@@ -36,6 +36,7 @@ HMAC_sha2_256(type ++ ASYMCRYPT_DECRYPT(encrypted_data, from, repo_private_key),
 ## Design notes
 
 - The 'to' field allows a repository to have multiple keys, which will allow easier key rotation.
+- The address function is an HMAC, meaning the server cannot lookup a dictionary of well known files.
 
 # HTree
 
